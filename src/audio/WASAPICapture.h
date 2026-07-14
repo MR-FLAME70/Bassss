@@ -50,8 +50,32 @@ struct AudioDeviceInfo {
 //
 class StereoRingBuffer {
 public:
-    static constexpr int kCapacity = 32768; // frames — ~680 ms @ 48 kHz
+    // Hard safety ceiling only — NOT the steady-state latency. Real-world
+    // latency is actively pinned to kTargetLatencyFrames by trimToTargetLatency()
+    // below. This cap just bounds worst-case memory/drop behavior if the
+    // consumer stalls completely (e.g. device glitch).
+    static constexpr int kCapacity = 16384; // frames — ~340 ms @ 48 kHz
     static constexpr int kMask     = kCapacity - 1;
+
+    // ── Active latency control ────────────────────────────────────────────
+    // The capture thread (WASAPI event period, ~10 ms bursts) and the output
+    // thread (PortAudio callback, its own device clock) are two independently
+    // clocked producer/consumer threads. Nothing about that pairing bounds
+    // *queued* latency on its own: a one-time startup gap (WASAPI already
+    // pushing frames while the PortAudio output device is still opening) or
+    // slow sample-rate drift between the two clocks both accumulate backlog
+    // in the ring buffer, and previously nothing ever drained it back down
+    // — it would just sit whatever the accumulated depth was for the life of
+    // the stream (up to the old 680 ms overflow cap). That is the "hear the
+    // dry signal, then hear the wet signal 1-2s later" bug: it is a queued
+    // buffer/latency problem, not a DSP or reverb-decay problem.
+    //
+    // Fix: the consumer actively pins the queue depth to a small target.
+    // kTargetLatencyFrames is the latency we settle back to after a trim.
+    // kMaxLatencyFrames is the backlog threshold that triggers a trim.
+    // Call trimToTargetLatency() once per output callback (cheap, O(1)).
+    static constexpr int kTargetLatencyFrames = 480;  // ~10 ms @ 48 kHz
+    static constexpr int kMaxLatencyFrames    = 1920; // ~40 ms @ 48 kHz
 
     void reset() {
         writeIdx.store(0, std::memory_order_relaxed);
@@ -84,6 +108,24 @@ public:
     int available() const {
         return writeIdx.load(std::memory_order_acquire)
              - readIdx .load(std::memory_order_relaxed);
+    }
+
+    // Called from the consumer (PortAudio callback) thread, once per block.
+    // If the queued backlog exceeds kMaxLatencyFrames — from an initial
+    // startup gap or accumulated clock drift — fast-forward the read
+    // pointer to bring queued latency straight back down to
+    // kTargetLatencyFrames. This is a single, rare, deliberate skip (a
+    // few ms of audio dropped in one shot), which is inaudible, versus the
+    // previous behavior of silently carrying a growing, unbounded delay for
+    // the entire session. This is what actually keeps dry and wet
+    // perceptually locked together instead of drifting apart over time.
+    void trimToTargetLatency() {
+        int w  = writeIdx.load(std::memory_order_acquire);
+        int rd = readIdx.load(std::memory_order_relaxed);
+        int queued = w - rd;
+        if (queued > kMaxLatencyFrames) {
+            readIdx.store(w - kTargetLatencyFrames, std::memory_order_release);
+        }
     }
 
 private:

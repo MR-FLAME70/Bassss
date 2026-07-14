@@ -240,6 +240,13 @@ int AudioCapture::outCallback(const void*, void* outputBuffer,
     auto* self = static_cast<AudioCapture*>(userData);
     auto* out  = static_cast<float*>(outputBuffer);
 
+    // Actively pin queued latency before draining this block. Cheap (O(1)):
+    // only ever does work when backlog has actually built up (startup gap or
+    // clock drift between the WASAPI capture clock and this device's output
+    // clock). This is what keeps end-to-end latency bounded to ~10-40ms
+    // instead of silently growing and staying wherever it happened to drift.
+    self->m_ring.trimToTargetLatency();
+
     for (unsigned long i = 0; i < frameCount; ++i) {
         float l = 0.f, r = 0.f;
         self->m_ring.pop(l, r);          // raw input (or 0 on underrun)
