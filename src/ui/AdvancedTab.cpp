@@ -42,14 +42,11 @@ void AdvancedTab::buildUI() {
 
     // ── Acoustic Engine ───────────────────────────────────────────────────────
     {
-        auto* card = new DarkCard();
-        auto* cl   = new QVBoxLayout(card);
-        auto* hdr  = new QHBoxLayout();
-        toggleAcoustic = new ToggleSwitch();
-        hdr->addWidget(makeLabel("Acoustic Engine (SBX Pro Studio)", 12, true));
-        hdr->addStretch();
-        hdr->addWidget(toggleAcoustic);
-        cl->addLayout(hdr);
+        sectionAcoustic = new CollapsibleSection("Acoustic Engine (SBX Pro Studio)");
+        toggleAcoustic  = sectionAcoustic->toggle();
+        auto* cl = new QVBoxLayout(sectionAcoustic->content());
+        cl->setContentsMargins(0,0,0,0);
+        cl->setSpacing(8);
 
         makeRow(0,100,1, slSurround, lblSurround);
         makeRow(0,100,1, slCrystal,  lblCrystal);
@@ -63,19 +60,16 @@ void AdvancedTab::buildUI() {
         addRow(cl, "Crossover Hz",  slCrossover, lblCrossover);
         addRow(cl, "Smart Volume%", slSmartVol,  lblSmartVol);
         addRow(cl, "Dialog Plus%",  slDialog,    lblDialog);
-        vlay->addWidget(card);
+        vlay->addWidget(sectionAcoustic);
     }
 
     // ── Speaker Config ────────────────────────────────────────────────────────
     {
-        auto* card = new DarkCard();
-        auto* cl   = new QVBoxLayout(card);
-        auto* hdr  = new QHBoxLayout();
-        toggleSpeaker = new ToggleSwitch();
-        hdr->addWidget(makeLabel("Speaker Configuration", 12, true));
-        hdr->addStretch();
-        hdr->addWidget(toggleSpeaker);
-        cl->addLayout(hdr);
+        sectionSpeaker = new CollapsibleSection("Speaker Configuration");
+        toggleSpeaker  = sectionSpeaker->toggle();
+        auto* cl = new QVBoxLayout(sectionSpeaker->content());
+        cl->setContentsMargins(0,0,0,0);
+        cl->setSpacing(8);
 
         comboSpeakerMode = new QComboBox();
         comboSpeakerMode->setStyleSheet(
@@ -113,29 +107,24 @@ void AdvancedTab::buildUI() {
         addRow(cl, "Sub %", slLvSub, lblLvSub);
         addRow(cl, "RL %",  slLvRL,  lblLvRL);
         addRow(cl, "RR %",  slLvRR,  lblLvRR);
-        vlay->addWidget(card);
+        vlay->addWidget(sectionSpeaker);
     }
 
     // ── Advanced Reverb Engine ────────────────────────────────────────────────
     // All 14 parameters wired end-to-end:
     //   UI slider → AppSettings field → AudioProcessor → ReverbEngine / FDNReverb DSP
     {
-        auto* card = new DarkCard();
-        auto* cl   = new QVBoxLayout(card);
+        sectionReverb      = new CollapsibleSection("Advanced Reverb Engine");
+        toggleReverbEngine = sectionReverb->toggle();
 
-        // ── Header ────────────────────────────────────────────────────────────
-        {
-            auto* hdr = new QHBoxLayout();
-            toggleReverbEngine = new ToggleSwitch();
-            auto* title = makeLabel("Advanced Reverb Engine", 12, true);
-            auto* note  = makeDimLabel("(overrides basic reverb when on)");
-            note->setStyleSheet("color:#555; font-size:10px;");
-            hdr->addWidget(title);
-            hdr->addWidget(note);
-            hdr->addStretch();
-            hdr->addWidget(toggleReverbEngine);
-            cl->addLayout(hdr);
-        }
+        // Descriptive note stays in the header (always visible, not a control).
+        auto* note = makeDimLabel("(overrides basic reverb when on)");
+        note->setStyleSheet("color:#555; font-size:10px;");
+        sectionReverb->headerLayout()->insertWidget(1, note);
+
+        auto* cl = new QVBoxLayout(sectionReverb->content());
+        cl->setContentsMargins(0,0,0,0);
+        cl->setSpacing(8);
 
         // ── Section: Room character ───────────────────────────────────────────
         // Slider ranges mirror popup.html's widened "overdrive" headroom;
@@ -187,7 +176,7 @@ void AdvancedTab::buildUI() {
         addRow(cl, "Wet Level %",    slWetLevel, lblWetLevel);
         addRow(cl, "Dry Level %",    slDryLevel, lblDryLevel);
 
-        vlay->addWidget(card);
+        vlay->addWidget(sectionReverb);
     }
 
     vlay->addStretch();
@@ -271,7 +260,12 @@ void AdvancedTab::refreshFromSettings(const AppSettings& s) {
     m_settings = s;
 
     // Acoustic engine
+    // Block signals so this programmatic sync doesn't trigger the animated
+    // expand/collapse — setExpanded(..., false) below does an instant sync.
+    toggleAcoustic->blockSignals(true);
     toggleAcoustic->setChecked(s.acousticEngineOn);
+    toggleAcoustic->blockSignals(false);
+    sectionAcoustic->setExpanded(s.acousticEngineOn, false);
     slSurround ->setValueF(s.fxSurround);    lblSurround ->setText(QString::number((int)s.fxSurround)    +" %");
     slCrystal  ->setValueF(s.fxCrystalizer); lblCrystal  ->setText(QString::number((int)s.fxCrystalizer) +" %");
     slBass     ->setValueF(s.fxBass);        lblBass     ->setText(QString::number((int)s.fxBass)         +" %");
@@ -280,7 +274,10 @@ void AdvancedTab::refreshFromSettings(const AppSettings& s) {
     slDialog   ->setValueF(s.fxDialogPlus);  lblDialog   ->setText(QString::number((int)s.fxDialogPlus)   +" %");
 
     // Speaker config
+    toggleSpeaker->blockSignals(true);
     toggleSpeaker->setChecked(s.speakerConfigOn);
+    toggleSpeaker->blockSignals(false);
+    sectionSpeaker->setExpanded(s.speakerConfigOn, false);
     {
         int idx = comboSpeakerMode->findText(s.speakerMode);
         if (idx >= 0) comboSpeakerMode->setCurrentIndex(idx);
@@ -298,7 +295,10 @@ void AdvancedTab::refreshFromSettings(const AppSettings& s) {
     slLvRR ->setValueF(s.speakerLevelRR);  lblLvRR ->setText(QString::number((int)s.speakerLevelRR)  +" %");
 
     // Advanced reverb engine
+    toggleReverbEngine->blockSignals(true);
     toggleReverbEngine->setChecked(s.reverbEngineOn);
+    toggleReverbEngine->blockSignals(false);
+    sectionReverb->setExpanded(s.reverbEngineOn, false);
     slRoomSize ->setValueF(s.reverbRoomSize);                lblRoomSize ->setText(QString::number(s.reverbRoomSize,'f',2));
     slDensity  ->setValueF(s.reverbDensity);                 lblDensity  ->setText(QString::number((int)s.reverbDensity)              +" %");
     slModDepth ->setValueF(s.reverbModulationDepth);         lblModDepth ->setText(QString::number((int)s.reverbModulationDepth)      +" %");

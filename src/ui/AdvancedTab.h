@@ -29,6 +29,14 @@ signals:
 private:
     AppSettings m_settings;
 
+    // Each effect lives in a CollapsibleSection: title + Enable/Disable switch
+    // always visible; body (sliders/dropdowns/labels) hidden while disabled,
+    // shown with an animated expand when enabled. toggleXxx below now just
+    // aliases sectionXxx->toggle() so the rest of the wiring code is unchanged.
+    CollapsibleSection* sectionAcoustic;
+    CollapsibleSection* sectionSpeaker;
+    CollapsibleSection* sectionReverb;
+
     // Acoustic engine
     ToggleSwitch* toggleAcoustic;
     DarkSlider*   slSurround, *slCrystal, *slBass, *slCrossover, *slSmartVol, *slDialog;

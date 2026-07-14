@@ -7,6 +7,8 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QTimer>
+#include <QPropertyAnimation>
+#include <QHBoxLayout>
 #include <functional>
 #include <vector>
 
@@ -126,22 +128,42 @@ private:
     std::vector<float> m_bins;
 };
 
-// ── Section group box with collapse support ────────────────────────────────────
+// ── Effect section: card with title + Enable/Disable switch that drives an
+//    animated expand/collapse of its body. Disabled == only the title and the
+//    toggle remain visible; every slider, dropdown, and parameter label the
+//    caller adds to content() is hidden with the body, and reappears with its
+//    previous value intact (values live in AppSettings, never in the hidden
+//    widgets, so nothing is lost while collapsed).
+// ────────────────────────────────────────────────────────────────────────────
 class CollapsibleSection : public QWidget {
     Q_OBJECT
 public:
     explicit CollapsibleSection(const QString& title, QWidget* parent = nullptr);
+
+    // Add rows/controls here — this is the part hidden when disabled.
     QWidget* content() { return m_content; }
-    void setCollapsed(bool c);
+    // Header row (title + toggle) — append extra widgets (e.g. a note label)
+    // before the toggle via headerLayout()->insertWidget(idx, w).
+    QHBoxLayout* headerLayout() { return m_headerLayout; }
+    ToggleSwitch* toggle() { return m_toggle; }
+
+    bool isExpanded() const { return m_expanded; }
+    // animate=false is for initial sync from settings — no visible motion.
+    void setExpanded(bool expanded, bool animate = true);
+
+signals:
+    void toggled(bool on);
 
 protected:
     void paintEvent(QPaintEvent*) override;
-    void mousePressEvent(QMouseEvent*) override;
 
 private:
-    QString  m_title;
-    QWidget* m_content;
-    bool     m_collapsed = false;
+    QString              m_title;
+    ToggleSwitch*         m_toggle;
+    QHBoxLayout*          m_headerLayout;
+    QWidget*              m_content;
+    QPropertyAnimation*   m_anim;
+    bool                  m_expanded = false;
 };
 
 // ── Card container ─────────────────────────────────────────────────────────────

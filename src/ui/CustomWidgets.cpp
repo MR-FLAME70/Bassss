@@ -254,48 +254,84 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
 CollapsibleSection::CollapsibleSection(const QString& title, QWidget* parent)
     : QWidget(parent), m_title(title)
 {
-    auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0,24,0,0);
-    layout->setSpacing(0);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(16,14,16,14);
+    outer->setSpacing(10);
+
+    // ── Header: title + Enable/Disable switch. Always visible. ────────────────
+    m_headerLayout = new QHBoxLayout();
+    auto* titleLbl = makeLabel(title, 12, true);
+    m_toggle = new ToggleSwitch();
+    m_headerLayout->addWidget(titleLbl);
+    m_headerLayout->addStretch();
+    m_headerLayout->addWidget(m_toggle);
+    outer->addLayout(m_headerLayout);
+
+    // ── Body: everything the caller adds via content() — hidden when off. ─────
     m_content = new QWidget(this);
-    layout->addWidget(m_content);
-    setCursor(Qt::PointingHandCursor);
+    m_content->setMaximumHeight(0);
+    m_content->setVisible(false);
+    outer->addWidget(m_content);
+
+    m_anim = new QPropertyAnimation(m_content, "maximumHeight", this);
+    m_anim->setDuration(220);
+    m_anim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_anim, &QPropertyAnimation::finished, this, [this]{
+        if (m_expanded) m_content->setMaximumHeight(QWIDGETSIZE_MAX);
+        else             m_content->setVisible(false);
+    });
+
+    connect(m_toggle, &ToggleSwitch::toggled, this, [this](bool on){
+        setExpanded(on, true);
+        emit toggled(on);
+    });
 }
 
-void CollapsibleSection::setCollapsed(bool c) {
-    m_collapsed = c;
-    m_content->setVisible(!c);
+void CollapsibleSection::setExpanded(bool expanded, bool animate) {
+    m_expanded = expanded;
+    if (m_toggle->isChecked() != expanded) m_toggle->setChecked(expanded);
+    m_anim->stop();
+
+    if (expanded) {
+        m_content->setVisible(true);
+        int target = m_content->layout() ? m_content->layout()->sizeHint().height()
+                                          : m_content->sizeHint().height();
+        if (animate) {
+            m_anim->setEasingCurve(QEasingCurve::OutCubic);
+            m_anim->setStartValue(m_content->maximumHeight() > 0 ? m_content->maximumHeight() : 0);
+            m_anim->setEndValue(target);
+            m_anim->start();
+        } else {
+            m_content->setMaximumHeight(QWIDGETSIZE_MAX);
+        }
+    } else {
+        int start = m_content->maximumHeight();
+        if (start <= 0 || start == QWIDGETSIZE_MAX)
+            start = m_content->layout() ? m_content->layout()->sizeHint().height()
+                                         : m_content->sizeHint().height();
+        if (animate) {
+            m_anim->setEasingCurve(QEasingCurve::InCubic);
+            m_anim->setStartValue(start);
+            m_anim->setEndValue(0);
+            m_anim->start();
+        } else {
+            m_content->setMaximumHeight(0);
+            m_content->setVisible(false);
+        }
+    }
     update();
 }
 
 void CollapsibleSection::paintEvent(QPaintEvent*) {
+    // Same rounded-card chrome as DarkCard, so sections still read as cards.
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-
-    // Header bar
-    p.fillRect(0,0,width(),22, QColor(0x18,0x18,0x18));
-    p.setPen(QColor(0x2a,0x2a,0x2a));
-    p.drawLine(0,22, width(),22);
-
-    // Title
-    p.setPen(QColor(0xaa,0xaa,0xaa));
-    p.setFont(QFont("Segoe UI", 10));
-    p.drawText(QRect(8,0,width()-30,22), Qt::AlignVCenter, m_title);
-
-    // Chevron
-    p.setPen(QPen(QColor(0x88,0x88,0x88), 1.5));
-    int cx = width()-14, cy = 11;
-    if (m_collapsed) {
-        p.drawLine(cx-4,cy-2, cx,cy+2);
-        p.drawLine(cx,cy+2,   cx+4,cy-2);
-    } else {
-        p.drawLine(cx-4,cy+2, cx,cy-2);
-        p.drawLine(cx,cy-2,   cx+4,cy+2);
-    }
-}
-
-void CollapsibleSection::mousePressEvent(QMouseEvent* e) {
-    if (e->y() <= 22) setCollapsed(!m_collapsed);
+    QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    QPainterPath path;
+    path.addRoundedRect(r, 10, 10);
+    p.fillPath(path, QColor(0x12,0x12,0x12));
+    p.setPen(QPen(QColor(0x28,0x28,0x28), 1));
+    p.drawPath(path);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
