@@ -15,6 +15,10 @@
 #include <QPainterPath>
 #include <QMessageBox>
 #include <QApplication>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
+#include <QParallelAnimationGroup>
+#include <QPixmap>
 
 // ── Data roles for device combo boxes ─────────────────────────────────────────
 // UserRole+0 = device ID string (QString)
@@ -617,8 +621,86 @@ void MainWindow::onAudioError(const QString& msg) {
     stopCapture();
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Tab switch: crossfade instead of an instant cut.
+//
+// Approach: grab a snapshot of the outgoing page into a plain overlay label
+// (cheap to fade — no live repaint cost, so Live Tab's VU meter/spectrum
+// timers can't make it stutter), switch the stack to the new page right
+// away, and run two opacity animations in parallel: the overlay 1→0 and the
+// new page 0→1. Both effects are torn down the moment the animation ends so
+// steady-state rendering pays zero extra compositing cost.
+// ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::onTabChanged(int idx) {
-    static_cast<QStackedWidget*>(m_stack)->setCurrentIndex(idx);
+    auto* stack  = static_cast<QStackedWidget*>(m_stack);
+    int   oldIdx = stack->currentIndex();
+    if (oldIdx == idx) return;
+
+    // A tab click mid-transition should feel instant, not queue up behind
+    // the running animation — drop it and start clean.
+    if (m_tabAnim) {
+        m_tabAnim->stop();
+        m_tabAnim->deleteLater();
+        m_tabAnim = nullptr;
+    }
+    if (m_tabFadeOverlay) {
+        m_tabFadeOverlay->deleteLater();
+        m_tabFadeOverlay = nullptr;
+    }
+    QWidget* oldWidget = stack->widget(oldIdx);
+    // Clears any leftover incoming-fade effect from an interrupted previous
+    // transition so the snapshot below captures it at full opacity.
+    if (oldWidget->graphicsEffect()) oldWidget->setGraphicsEffect(nullptr);
+
+    QPixmap snapshot = oldWidget->grab();
+    m_tabFadeOverlay = new QLabel(stack);
+    m_tabFadeOverlay->setPixmap(snapshot);
+    m_tabFadeOverlay->setGeometry(stack->rect());
+    m_tabFadeOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_tabOverlayEffect = new QGraphicsOpacityEffect(m_tabFadeOverlay);
+    m_tabFadeOverlay->setGraphicsEffect(m_tabOverlayEffect);
+    m_tabFadeOverlay->show();
+    m_tabFadeOverlay->raise();
+
+    stack->setCurrentIndex(idx);
+    QWidget* newWidget = stack->widget(idx);
+    auto* incomingEffect = new QGraphicsOpacityEffect(newWidget);
+    incomingEffect->setOpacity(0.0);
+    newWidget->setGraphicsEffect(incomingEffect);
+
+    const int kDurationMs = 180; // within the requested 150–250ms window
+
+    auto* fadeOut = new QPropertyAnimation(m_tabOverlayEffect, "opacity");
+    fadeOut->setDuration(kDurationMs);
+    fadeOut->setStartValue(1.0);
+    fadeOut->setEndValue(0.0);
+    fadeOut->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto* fadeIn = new QPropertyAnimation(incomingEffect, "opacity");
+    fadeIn->setDuration(kDurationMs);
+    fadeIn->setStartValue(0.0);
+    fadeIn->setEndValue(1.0);
+    fadeIn->setEasingCurve(QEasingCurve::OutCubic);
+
+    m_tabAnim = new QParallelAnimationGroup(this);
+    m_tabAnim->addAnimation(fadeOut);
+    m_tabAnim->addAnimation(fadeIn);
+
+    connect(m_tabAnim, &QParallelAnimationGroup::finished, this, [this, newWidget]{
+        // Drop the opacity effects once settled — leaving them attached
+        // would add a compositing pass to every future repaint for no
+        // visual benefit at full opacity.
+        if (newWidget) newWidget->setGraphicsEffect(nullptr);
+        if (m_tabFadeOverlay) {
+            m_tabFadeOverlay->deleteLater();
+            m_tabFadeOverlay = nullptr;
+        }
+        if (m_tabAnim) {
+            m_tabAnim->deleteLater();
+            m_tabAnim = nullptr;
+        }
+    });
+    m_tabAnim->start();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

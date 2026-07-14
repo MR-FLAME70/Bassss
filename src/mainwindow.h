@@ -17,6 +17,8 @@
 class LiveTab;
 class AdvancedTab;
 class AdvancedAudioTab;
+class QGraphicsOpacityEffect;
+class QParallelAnimationGroup;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // MainWindow — 800×600 fixed-size frameless dark window matching popup.html.
@@ -77,6 +79,15 @@ private:
     // title/status bar chrome so their rounded corners align exactly and
     // read as one continuous anti-aliased edge instead of a boxy frame.
     static constexpr int kCornerRadius = 12;
+
+    // Tab-switch crossfade: a static snapshot of the outgoing page fades out
+    // on top while the incoming page (already switched in underneath) fades
+    // in — both run in parallel, so the whole thing is one short blend
+    // rather than a sequential fade-out-then-fade-in that would feel slower
+    // and jankier than it needs to be.
+    QLabel*                  m_tabFadeOverlay    = nullptr;
+    QGraphicsOpacityEffect*  m_tabOverlayEffect  = nullptr;
+    QParallelAnimationGroup* m_tabAnim           = nullptr;
 
     // UI
     QWidget*        m_titleBar;
