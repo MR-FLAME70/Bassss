@@ -55,6 +55,10 @@ public:
 
     void init(double sr) {
         sampleRate = sr;
+        // DC blocker coefficient: R = 1 - 2π·fc/SR, fc = 3 Hz
+        dcBlockR = (float)(1.0 - 2.0 * M_PI * 3.0 / sr);
+        dcPrevL = dcPrevR = dcL = dcR = 0.f;
+
         fdn.init(sr);
 
         hfDampShelf .setType(BiquadFilter::HighShelf, sr, 6000.0, 0.707, 0.0);
@@ -105,6 +109,19 @@ public:
 
     // Process one stereo frame
     void processStereo(float inL, float inR, float& outL, float& outR) {
+        // ── DC blocking (one-pole HPF, fc ≈ 3 Hz) ─────────────────────────────
+        // Removes any DC offset that enters from the WASAPI loopback capture
+        // (Windows audio engine can introduce a small DC bias).  Without this,
+        // the bias accumulates through the FDN feedback and rides the reverb
+        // tail as a low-frequency rumble.
+        // Formula: y[n] = x[n] - x[n-1] + R*y[n-1],  R = 1 - 2π·fc/SR
+        const float R = dcBlockR;
+        float newDcL = R * dcL + inL - dcPrevL;
+        float newDcR = R * dcR + inR - dcPrevR;
+        dcPrevL = inL; dcPrevR = inR;
+        dcL = newDcL;  dcR = newDcR;
+        inL = newDcL;  inR = newDcR;
+
         // Pre-delay
         float pdL = readDelay(preDelayBuf,  preDelayWrite, preDelaySamples());
         float pdR = readDelay(preDelayBufR, preDelayWrite, preDelaySamples());
@@ -155,6 +172,11 @@ private:
     double sampleRate = 44100.0;
     FDNReverb    fdn;
     BiquadFilter hfDampShelf, lfDampShelf, lowCutFilter, highCutFilter;
+
+    // ── DC blocker state ──────────────────────────────────────────────────────
+    float dcBlockR = 0.99961f; // R = 1 - 2π·3/48000
+    float dcPrevL  = 0.f, dcPrevR = 0.f;
+    float dcL      = 0.f, dcR    = 0.f;
 
     std::vector<float> preDelayBuf, preDelayBufR;
     int preDelayWrite = 0;
