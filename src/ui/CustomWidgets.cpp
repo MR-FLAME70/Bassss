@@ -59,29 +59,53 @@ void ToggleSwitch::mousePressEvent(QMouseEvent*) {
 // DarkSlider
 // ──────────────────────────────────────────────────────────────────────────────
 DarkSlider::DarkSlider(Qt::Orientation o, QWidget* parent) : QSlider(o, parent) {
+    // Recessed-channel fader look: the groove sits visibly darker/bordered
+    // than the surrounding card so it reads clearly against the background,
+    // the filled portion uses a brighter silver so progress is unambiguous
+    // at a glance, and the handle stays crisp white with a dark rim.
     setStyleSheet(R"(
         QSlider::groove:horizontal {
-            background: #1c1c1c; height: 4px; border-radius: 2px;
-            border: 1px solid #2a2a2a;
+            background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                        stop:0 #0a0a0a, stop:1 #1a1a1a);
+            height: 5px; border-radius: 2px;
+            border: 1px solid #050505;
         }
         QSlider::groove:vertical {
-            background: #1c1c1c; width: 4px; border-radius: 2px;
-            border: 1px solid #2a2a2a;
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                        stop:0 #0a0a0a, stop:1 #1a1a1a);
+            width: 5px; border-radius: 2px;
+            border: 1px solid #050505;
         }
         QSlider::handle:horizontal {
-            background: #e8e8e8; width: 15px; height: 15px;
-            border: 1px solid #050505; border-radius: 8px; margin: -6px 0;
+            background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                        stop:0 #f5f5f5, stop:1 #d4d4d4);
+            width: 15px; height: 15px;
+            border: 1px solid #000000; border-radius: 8px; margin: -6px 0;
         }
         QSlider::handle:vertical {
-            background: #e8e8e8; width: 15px; height: 15px;
-            border: 1px solid #050505; border-radius: 8px; margin: 0 -6px;
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                        stop:0 #f5f5f5, stop:1 #d4d4d4);
+            width: 15px; height: 15px;
+            border: 1px solid #000000; border-radius: 8px; margin: 0 -6px;
         }
-        QSlider::handle:hover    { background: #ffffff; }
-        QSlider::handle:pressed  { background: #cfcfcf; }
-        QSlider::sub-page:horizontal { background: #9a9a9a; border-radius: 2px; }
-        QSlider::add-page:vertical   { background: #9a9a9a; border-radius: 2px; }
-        QSlider::add-page:horizontal { background: #1c1c1c; border-radius: 2px; }
-        QSlider::sub-page:vertical   { background: #1c1c1c; border-radius: 2px; }
+        QSlider::handle:hover    { background: #ffffff; border: 1px solid #000000; }
+        QSlider::handle:pressed  { background: #c0c0c0; border: 1px solid #000000; }
+        QSlider::sub-page:horizontal {
+            background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                        stop:0 #cfcfcf, stop:1 #9a9a9a);
+            border: 1px solid #050505; border-radius: 2px;
+        }
+        QSlider::add-page:vertical {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                        stop:0 #cfcfcf, stop:1 #9a9a9a);
+            border: 1px solid #050505; border-radius: 2px;
+        }
+        QSlider::add-page:horizontal {
+            background: #101010; border: 1px solid #050505; border-radius: 2px;
+        }
+        QSlider::sub-page:vertical {
+            background: #101010; border: 1px solid #050505; border-radius: 2px;
+        }
     )");
     setRange(0, 10000);
 }
