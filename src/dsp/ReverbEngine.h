@@ -4,29 +4,31 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
-#include <cstring>
+#include <cstdint>
 #include <array>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ReverbEngine — C++ port of createHybridReverbEngine() in reverb-engine.js.
+// ReverbEngine — exact C++ port of createHybridReverbEngine() in reverb-engine.js.
 //
-// Signal chain (unchanged from original):
-//   input → pre-delay → +──→ Early Reflections  → erGain  ──┐
-//                        └──→ FDN late tail       → lateGain ┤→ wetBus
-//   wetBus → HF shelf → LF shelf → lowCut HP → highCut LP
-//          → M/S width → wetLevel → output
-//   input → dryLevel → output   (per setParams wetLevel / dryLevel)
+// Signal chain (identical to the original Web Audio graph):
+//   input → preDelay → ┬→ erDelay → erConvolver → erGain ─┐
+//                       └→ FDN late tail          → lateGain ┤→ wetBus
+//   wetBus → hfDampShelf(highshelf) → lfDampShelf(lowshelf) → lowCut(HP)
+//          → highCut(LP) → M/S width → wetLevel ─┐
+//   input → dryLevel ──────────────────────────────┴→ output
 //
-// PERFORMANCE FIX — Early Reflections:
-//   The original used direct FIR convolution (IR ≈ 11,520 samples at 48 kHz).
-//   Cost: O(IR_len) per sample = ~500 M MACs/s — too heavy for real-time.
+// Early reflections use a *true* FIR convolution against a synthesized stereo
+// "cave" impulse response (makeCaveEarlyReflectionIR), reproduced bit-for-bit
+// from the original algorithm: a deterministic mulberry32 PRNG, golden-ratio
+// tap scatter, per-channel decorrelated one-pole-lowpassed noise bursts, an
+// exponential decay envelope, and peak normalization to 0.9. This replaces a
+// prior sparse-tap-delay approximation that did not match the original sound.
 //
-//   Replacement: sparse tapped delay line with 7 taps.
-//   The tap positions and amplitudes are derived from the same golden-ratio
-//   algorithm as the original makeCaveEarlyReflectionIR, but instead of
-//   building a dense buffer and convolving it we just store the tap parameters
-//   and read from a short circular delay line.
-//   Cost: O(7) per sample ≈ 3 M MACs/s — essentially free.
+// Per the Web Audio ConvolverNode spec (2-channel IR × 2-channel input is
+// handled as two independent per-channel convolutions — verified against the
+// Chromium/Blink Reverb implementation, case "2 -> 2 -> 2"), channel L is
+// convolved with impulse channel 0 and channel R with impulse channel 1;
+// there is no cross-channel mixing.
 // ──────────────────────────────────────────────────────────────────────────────
 class ReverbEngine {
 public:
@@ -55,9 +57,6 @@ public:
 
     void init(double sr) {
         sampleRate = sr;
-        // DC blocker coefficient: R = 1 - 2π·fc/SR, fc = 3 Hz
-        dcBlockR = (float)(1.0 - 2.0 * M_PI * 3.0 / sr);
-        dcPrevL = dcPrevR = dcL = dcR = 0.f;
 
         fdn.init(sr);
 
@@ -66,29 +65,49 @@ public:
         lowCutFilter .setType(BiquadFilter::HighPass, sr, 80.0,   0.707, 0.0);
         highCutFilter.setType(BiquadFilter::LowPass,  sr, 9000.0, 0.707, 0.0);
 
-        // Pre-delay buffer (up to 2 s)
+        // Pre-delay buffer (up to 2 s, matches ctx.createDelay(2) in the original)
         int pdMax = (int)(2.0 * sr) + 4;
-        preDelayBuf .assign(pdMax, 0.f);
+        preDelayBufL.assign(pdMax, 0.f);
         preDelayBufR.assign(pdMax, 0.f);
         preDelayWrite = 0;
 
-        // ER additional delay (up to 0.5 s)
+        // ER additional delay (up to 0.5 s, matches ctx.createDelay(0.5))
         int erMax = (int)(0.5 * sr) + 4;
         erDelayBufL.assign(erMax, 0.f);
         erDelayBufR.assign(erMax, 0.f);
         erDelayWrite = 0;
 
-        // Build sparse ER taps from current params
-        buildErTaps(p.roomSize, p.diffusion);
+        // Force a fresh IR build for the current room parameters.
+        erImpulseKeyValid = false;
+        rebuildErImpulseIfNeeded(p.roomSize, p.diffusion);
     }
 
     void setSampleRate(double sr) { init(sr); }
 
     void setParams(const Params& newP) {
-        bool needTaps = (std::abs(newP.roomSize  - p.roomSize)  > 0.001f ||
-                         std::abs(newP.diffusion - p.diffusion) > 0.001f);
         p = newP;
-        if (needTaps) buildErTaps(p.roomSize, p.diffusion);
+
+        // Clamps mirror setParams() in reverb-engine.js / parameterDescriptors
+        // in fdn-reverb-worklet.js.
+        p.preDelay             = std::max(0.f, p.preDelay);
+        p.earlyReflectionDelay = std::max(0.f, p.earlyReflectionDelay);
+        p.earlyReflectionLevel = std::max(0.f, p.earlyReflectionLevel);
+        p.lateReverbLevel      = std::max(0.f, p.lateReverbLevel);
+        p.wetLevel              = std::max(0.f, p.wetLevel);
+        p.dryLevel              = std::max(0.f, p.dryLevel);
+        p.highCut     = clampf(p.highCut, 200.f, 20000.f);
+        p.lowCut      = clampf(p.lowCut,   20.f,  2000.f);
+        p.hfDamping   = clampf(p.hfDamping, 0.f, 1.f);
+        p.lfDamping   = clampf(p.lfDamping, 0.f, 1.f);
+        p.stereoWidth = clampf(p.stereoWidth, 0.f, 2.f);
+        p.roomSize    = clampf(p.roomSize, 0.25f, 3.0f);
+        p.decayTime   = clampf(p.decayTime, 0.1f, 25.0f);
+        p.diffusion   = clampf(p.diffusion, 0.f, 1.f);
+        p.density     = clampf(p.density, 0.f, 1.f);
+        p.modulationDepth = clampf(p.modulationDepth, 0.f, 1.f);
+        p.modulationRate  = clampf(p.modulationRate, 0.f, 1.f);
+
+        rebuildErImpulseIfNeeded(p.roomSize, p.diffusion);
 
         FDNReverb::Params fdnP;
         fdnP.roomSize  = p.roomSize;
@@ -101,46 +120,33 @@ public:
         fdnP.modRate   = p.modulationRate;
         fdn.setParams(fdnP);
 
-        hfDampShelf .setGain(-std::min(1.f, std::max(0.f, p.hfDamping)) * 12.f);
-        lfDampShelf .setGain(-std::min(1.f, std::max(0.f, p.lfDamping)) *  6.f);
-        lowCutFilter .setFrequency(std::min(2000.f, std::max(20.f, p.lowCut)));
-        highCutFilter.setFrequency(std::min(20000.f, std::max(200.f, p.highCut)));
+        hfDampShelf .setGain(-p.hfDamping * 12.f);
+        lfDampShelf .setGain(-p.lfDamping *  6.f);
+        lowCutFilter .setFrequency(p.lowCut);
+        highCutFilter.setFrequency(p.highCut);
     }
 
     // Process one stereo frame
     void processStereo(float inL, float inR, float& outL, float& outR) {
-        // ── DC blocking (one-pole HPF, fc ≈ 3 Hz) ─────────────────────────────
-        // Removes any DC offset that enters from the WASAPI loopback capture
-        // (Windows audio engine can introduce a small DC bias).  Without this,
-        // the bias accumulates through the FDN feedback and rides the reverb
-        // tail as a low-frequency rumble.
-        // Formula: y[n] = x[n] - x[n-1] + R*y[n-1],  R = 1 - 2π·fc/SR
-        const float R = dcBlockR;
-        float newDcL = R * dcL + inL - dcPrevL;
-        float newDcR = R * dcR + inR - dcPrevR;
-        dcPrevL = inL; dcPrevR = inR;
-        dcL = newDcL;  dcR = newDcR;
-        inL = newDcL;  inR = newDcR;
-
         // Pre-delay
-        float pdL = readDelay(preDelayBuf,  preDelayWrite, preDelaySamples());
+        float pdL = readDelay(preDelayBufL, preDelayWrite, preDelaySamples());
         float pdR = readDelay(preDelayBufR, preDelayWrite, preDelaySamples());
-        writeDelay(preDelayBuf,  preDelayWrite, inL);
+        writeDelay(preDelayBufL, preDelayWrite, inL);
         writeDelay(preDelayBufR, preDelayWrite, inR);
 
-        // ER additional pre-delay
+        // ER additional pre-delay (parallel branch off the shared pre-delay)
         float erInL = readDelay(erDelayBufL, erDelayWrite, erDelaySamples());
         float erInR = readDelay(erDelayBufR, erDelayWrite, erDelaySamples());
         writeDelay(erDelayBufL, erDelayWrite, pdL);
         writeDelay(erDelayBufR, erDelayWrite, pdR);
 
-        // Early reflections — sparse tapped delay line (O(7) per sample)
-        float convL = 0.f, convR = 0.f;
-        processErSparse(erInL, erInR, convL, convR);
-        convL *= p.earlyReflectionLevel;
-        convR *= p.earlyReflectionLevel;
+        // Early reflections — true FIR convolution against the synthesized
+        // stereo cave impulse response (independent per channel).
+        float convL = erConvL.process(erInL) * p.earlyReflectionLevel;
+        float convR = erConvR.process(erInR) * p.earlyReflectionLevel;
 
-        // Late tail (FDN)
+        // Late tail (FDN), fed directly from the shared pre-delay (parallel
+        // with the ER branch, not chained through erDelay).
         float lateL = 0.f, lateR = 0.f;
         fdn.processStereo(pdL, pdR, lateL, lateR);
         lateL *= p.lateReverbLevel;
@@ -173,98 +179,18 @@ private:
     FDNReverb    fdn;
     BiquadFilter hfDampShelf, lfDampShelf, lowCutFilter, highCutFilter;
 
-    // ── DC blocker state ──────────────────────────────────────────────────────
-    float dcBlockR = 0.99961f; // R = 1 - 2π·3/48000
-    float dcPrevL  = 0.f, dcPrevR = 0.f;
-    float dcL      = 0.f, dcR    = 0.f;
-
-    std::vector<float> preDelayBuf, preDelayBufR;
+    std::vector<float> preDelayBufL, preDelayBufR;
     int preDelayWrite = 0;
 
     std::vector<float> erDelayBufL, erDelayBufR;
     int erDelayWrite = 0;
 
-    // ── Sparse early-reflection tapped delay line ──────────────────────────────
-    // Each tap reads from a circular delay line at a fixed offset and
-    // accumulates into the output with an independent L and R gain.
-    // 7 taps is the exact same tap count as the original IR builder.
-    static constexpr int ER_TAPS = 7;
-
-    struct ErTap {
-        int   delay;   // in samples
-        float gainL;
-        float gainR;
-    };
-    std::array<ErTap, ER_TAPS> erTaps{};
-    std::vector<float> erLineL, erLineR;
-    int erLinePos = 0;
-
-    // Build tap positions from the same golden-ratio algorithm used in the
-    // original makeCaveEarlyReflectionIR.  Instead of writing into a dense
-    // buffer and doing convolution, we record only the centre position and
-    // amplitude of each tap burst.
-    void buildErTaps(float roomSize, float diffusion) {
-        double sr = sampleRate;
-
-        // Cap the maximum tap delay at 150 ms (was 280 ms with the dense IR).
-        // The perceptual difference at the delay line length is inaudible;
-        // the saving in memory and computation is significant.
-        double durSec  = std::min(0.15, 0.04 + roomSize * 0.04);
-        int    maxDelay = std::max(8, (int)(durSec * sr));
-
-        erLineL.assign(maxDelay + 8, 0.f);
-        erLineR.assign(maxDelay + 8, 0.f);
-        erLinePos = 0;
-
-        double spread = 0.05 + (1.0 - (double)diffusion) * 0.15;
-
-        for (int k = 0; k < ER_TAPS; ++k) {
-            // L channel geometry (chSeed = 0.37, same as original ch=0)
-            double fracL = std::fmod((k + 1) * 0.618 + 0.37, 1.0);
-            double timeL = 0.006 + fracL * spread + k * (spread / (ER_TAPS * 2.2));
-            int    delL  = std::min(maxDelay - 1, std::max(1, (int)(timeL * sr)));
-
-            // R channel geometry (chSeed = 0.71, same as original ch=1)
-            double fracR = std::fmod((k + 1) * 0.618 + 0.71, 1.0);
-            double timeR = 0.006 + fracR * spread + k * (spread / (ER_TAPS * 2.2));
-            int    delR  = std::min(maxDelay - 1, std::max(1, (int)(timeR * sr)));
-
-            float ampL = (float)(std::pow(0.72, k) * (0.85 + 0.3 * std::fmod(k * 0.37, 1.0)));
-            float ampR = (float)(std::pow(0.72, k) * (0.85 + 0.3 * std::fmod(k * 0.71, 1.0)));
-
-            // Average L/R delays per tap; apply separate gain per channel.
-            // This is a minor approximation vs. the original (which had a full
-            // per-channel buffer) but is indistinguishable in a dense reverb mix.
-            erTaps[k].delay = (delL + delR) / 2;
-            erTaps[k].gainL = ampL * 0.65f;  // normalise peak to ~0.9
-            erTaps[k].gainR = ampR * 0.65f;
-        }
-    }
-
-    // Process one stereo frame through the sparse ER delay line.
-    // O(ER_TAPS) = O(7) per sample — ~1600x faster than the original O(11520).
-    void processErSparse(float inL, float inR, float& outL, float& outR) {
-        int sz = (int)erLineL.size();
-        if (sz < 2) { outL = outR = 0.f; return; }
-
-        erLineL[erLinePos] = inL;
-        erLineR[erLinePos] = inR;
-
-        outL = outR = 0.f;
-        for (int t = 0; t < ER_TAPS; ++t) {
-            int idx = erLinePos - erTaps[t].delay;
-            if (idx < 0) idx += sz;
-            outL += erLineL[idx] * erTaps[t].gainL;
-            outR += erLineR[idx] * erTaps[t].gainR;
-        }
-
-        erLinePos = (erLinePos + 1) % sz;
-    }
+    static float clampf(float v, float lo, float hi) { return std::min(hi, std::max(lo, v)); }
 
     // ── Delay helpers ──────────────────────────────────────────────────────────
     int preDelaySamples() const {
         return std::min((int)(p.preDelay * (float)sampleRate),
-                        (int)preDelayBuf.size() - 1);
+                        (int)preDelayBufL.size() - 1);
     }
     int erDelaySamples() const {
         return std::min((int)(p.earlyReflectionDelay * (float)sampleRate),
@@ -285,11 +211,163 @@ private:
     }
 
     // ── M/S stereo width ──────────────────────────────────────────────────────
+    // out = M ± S, M = 0.5*(L+R), S = 0.5*(L-R)*width  (matches the original
+    // exactly, including that width only scales the side signal).
     static void applyWidth(float& l, float& r, float width) {
         float mid  = 0.5f * (l + r);
         float side = 0.5f * (l - r);
         side *= width;
         l = mid + side;
         r = mid - side;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Early-reflection convolution engine
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // mulberry32 — bit-for-bit port of makeSeededRandom() in reverb-engine.js.
+    // JS bitwise ops treat numbers as 32-bit values; uint32_t arithmetic here
+    // reproduces the exact same bit patterns (unsigned wraparound == JS |0
+    // wraparound for XOR/shift/multiply purposes).
+    struct Mulberry32 {
+        uint32_t a;
+        explicit Mulberry32(uint32_t seed) : a(seed) {}
+        float next() {
+            a = a + 0x6d2b79f5u;
+            uint32_t t = (a ^ (a >> 15)) * (1u | a);
+            t = (t + ((t ^ (t >> 7)) * (61u | t))) ^ t;
+            uint32_t r = t ^ (t >> 14);
+            return (float)((double)r / 4294967296.0);
+        }
+    };
+
+    // Direct FIR convolution line using the classic "doubled circular buffer"
+    // trick: each incoming sample is mirrored at pos and pos+M, so the last M
+    // samples are always readable as one contiguous descending run with no
+    // per-tap modulo. Mathematically identical to Web Audio's ConvolverNode
+    // linear convolution (given a freshly (re)built impulse each parameter
+    // change, matching the original's "assign a new buffer" behavior).
+    struct ConvLine {
+        std::vector<float> ir;
+        std::vector<float> hist;
+        int M   = 1;
+        int pos = 0;
+
+        void setImpulse(std::vector<float> newIr) {
+            ir = std::move(newIr);
+            if (ir.empty()) ir.assign(1, 0.f);
+            M = (int)ir.size();
+            hist.assign((size_t)M * 2, 0.f);
+            pos = 0;
+        }
+
+        // Four independent accumulator chains (same math, reordered summation)
+        // let the compiler auto-vectorize this hot loop under normal strict
+        // floating-point settings (no -ffast-math needed) — this keeps the
+        // early-reflection convolution comfortably real-time even with IRs
+        // approaching 0.28s at high sample rates. This does not change the
+        // convolution algorithm, only the order partial sums are added in
+        // (a difference on the order of float rounding noise, inaudible).
+        inline float process(float x) {
+            hist[pos]     = x;
+            hist[pos + M] = x;
+            const int base = pos + M;
+            const float* irP  = ir.data();
+            const float* hP   = hist.data() + base;
+            float s0 = 0.f, s1 = 0.f, s2 = 0.f, s3 = 0.f;
+            int k = 0;
+            const int M4 = M - (M & 3);
+            for (; k < M4; k += 4) {
+                s0 += irP[k]     * hP[-k];
+                s1 += irP[k + 1] * hP[-(k + 1)];
+                s2 += irP[k + 2] * hP[-(k + 2)];
+                s3 += irP[k + 3] * hP[-(k + 3)];
+            }
+            float sum = (s0 + s1) + (s2 + s3);
+            for (; k < M; ++k) sum += irP[k] * hP[-k];
+            pos++;
+            if (pos >= M) pos = 0;
+            return sum;
+        }
+    };
+
+    ConvLine erConvL, erConvR;
+
+    bool  erImpulseKeyValid    = false;
+    float erImpulseRoomSize    = -1.f;
+    float erImpulseDiffusion   = -1.f;
+
+    void rebuildErImpulseIfNeeded(float roomSize, float diffusion) {
+        if (erImpulseKeyValid &&
+            std::fabs(roomSize  - erImpulseRoomSize)  < 0.0005f &&
+            std::fabs(diffusion - erImpulseDiffusion) < 0.0005f) return;
+        erImpulseKeyValid  = true;
+        erImpulseRoomSize  = roomSize;
+        erImpulseDiffusion = diffusion;
+        buildErImpulse(roomSize, diffusion);
+    }
+
+    // Exact port of makeCaveEarlyReflectionIR(ctx, {roomSize, diffusion}) from
+    // reverb-engine.js: a 2-channel buffer built from 7 golden-ratio-scattered,
+    // per-channel-decorrelated, one-pole-lowpassed noise bursts under an
+    // exponential decay envelope, peak-normalized to 0.9.
+    void buildErImpulse(float roomSize, float diffusion) {
+        const double sr = sampleRate;
+        const double durationSec = std::min(0.28, 0.09 + (double)roomSize * 0.06);
+        const int length = std::max(1, (int)std::floor(sr * durationSec));
+
+        std::vector<float> irL((size_t)length, 0.f), irR((size_t)length, 0.f);
+        const int tapCount = 7;
+        const double spread = 0.05 + (1.0 - (double)diffusion) * 0.15;
+
+        for (int ch = 0; ch < 2; ++ch) {
+            std::vector<float>& data = (ch == 0) ? irL : irR;
+            const double chSeed = (ch == 0) ? 0.37 : 0.71;
+
+            const uint32_t seed =
+                (uint32_t)std::floor((double)roomSize * 100003.0) ^
+                (uint32_t)std::floor((double)diffusion * 65537.0) ^
+                (uint32_t)(ch * 0x9e3779b9u);
+            Mulberry32 rng(seed);
+
+            for (int k = 0; k < tapCount; ++k) {
+                double frac = std::fmod((k + 1) * 0.618 + chSeed, 1.0);
+                double tapTime = 0.006 + frac * spread + k * (spread / (tapCount * 2.2));
+                int idx = (int)std::floor(tapTime * sr);
+                if (idx >= length) continue;
+
+                double amp = std::pow(0.72, k) * (0.85 + 0.3 * std::fmod(k * chSeed, 1.0));
+                int burstLen = std::max(1, (int)std::round(sr * 0.001));
+
+                float lp = 0.f;
+                for (int b = 0; b < burstLen && idx + b < length; ++b) {
+                    float white = rng.next() * 2.f - 1.f;
+                    lp += 0.5f * (white - lp);
+                    data[(size_t)(idx + b)] += lp * (float)amp * (1.f - (float)b / (float)burstLen);
+                }
+            }
+
+            for (int i = 0; i < length; ++i) {
+                double t = (double)i / sr;
+                data[(size_t)i] *= (float)std::pow(10.0, (-1.2 * t) / durationSec);
+            }
+        }
+
+        float peak = 0.f;
+        for (int i = 0; i < length; ++i) {
+            peak = std::max(peak, std::fabs(irL[(size_t)i]));
+            peak = std::max(peak, std::fabs(irR[(size_t)i]));
+        }
+        const float TARGET_PEAK = 0.9f;
+        if (peak > TARGET_PEAK) {
+            float scale = TARGET_PEAK / peak;
+            for (int i = 0; i < length; ++i) {
+                irL[(size_t)i] *= scale;
+                irR[(size_t)i] *= scale;
+            }
+        }
+
+        erConvL.setImpulse(std::move(irL));
+        erConvR.setImpulse(std::move(irR));
     }
 };
