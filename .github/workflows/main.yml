@@ -1,0 +1,208 @@
+name: Build Windows (Release)
+
+# Builds Bass Nuker on Windows with MSVC (Visual Studio 2022) + Qt6, deploys
+# the Qt runtime with windeployqt, packages a portable app folder and
+# uploads it as a downloadable GitHub Actions artifact.
+#
+# Runs automatically on every push / pull request, and can also be run
+# manually from the Actions tab (workflow_dispatch). No manual steps are
+# required after pushing the repository to GitHub. Pushing a tag (v*) also
+# attaches the packaged zip to a GitHub Release.
+
+on:
+  push:
+    branches: [ "**" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.7.3"
+  QT_ARCH: "win64_msvc2019_64"          # ABI-compatible with the VS2022 (v143) toolset
+  VCPKG_TRIPLET: "x64-windows"
+  VCPKG_DIR: "C:/vcpkg"
+  BUILD_TYPE: "Release"
+
+jobs:
+  build:
+    # NOTE: As of June 15, 2026, the "windows-latest" label was migrated by
+    # GitHub to a Visual Studio 2026 image. To guarantee the VS2022 (v143)
+    # toolset this project targets, the runner is pinned to "windows-2022"
+    # explicitly rather than "windows-latest". This remains a standard
+    # GitHub-hosted Windows runner, just with a fixed toolset version.
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: write   # overrides the workflow-level "contents: read" so this
+                         # job can create/attach to a GitHub Release on tag pushes
+
+    steps:
+      # ──────────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ──────────────────────────────────────────────────────────────────
+      # Visual Studio 2022 build tools are already preinstalled on the
+      # windows-2022 runner image; this just makes sure cl.exe / MSBuild
+      # are on PATH for the current shell (mainly useful if a Ninja/Makefile
+      # generator were ever substituted for the VS generator below).
+      - name: Set up MSVC developer environment (VS2022)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # Defensive: ilammy/msvc-dev-cmd (and VS2022 itself) can export their
+      # own VCPKG_ROOT pointing at the bundled vcpkg under the VS install
+      # directory. We use our own isolated VCPKG_DIR name (set above) so it
+      # can't collide with that, but re-assert it here too just in case.
+      - name: Confirm vcpkg directory
+        shell: pwsh
+        run: |
+          Write-Host "Using VCPKG_DIR=$env:VCPKG_DIR"
+          echo "VCPKG_DIR=C:/vcpkg" >> $env:GITHUB_ENV
+
+      # ──────────────────────────────────────────────────────────────────
+      - name: Install Qt ${{ env.QT_VERSION }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ env.QT_ARCH }}
+          modules: "qtmultimedia"
+          cache: true
+
+      # ──────────────────────────────────────────────────────────────────
+      # PortAudio (required) is installed with vcpkg, matching the paths
+      # CMakeLists.txt already looks for (C:/vcpkg/installed/<triplet>).
+      # Cache key is derived from CMakeLists.txt so it busts automatically
+      # if the PortAudio version/pin or vcpkg baseline ever changes there;
+      # restore-keys still lets a partial/previous cache seed the install
+      # even after a bust, keeping most of the speed-up.
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:/vcpkg/installed
+            C:/vcpkg/packages
+            C:/vcpkg/downloads
+          key: vcpkg-${{ runner.os }}-${{ env.VCPKG_TRIPLET }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ env.VCPKG_TRIPLET }}-
+
+      - name: Set up vcpkg
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:VCPKG_DIR/.git")) {
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git $env:VCPKG_DIR
+          }
+          & "$env:VCPKG_DIR/bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Install PortAudio via vcpkg
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_DIR/vcpkg.exe" install portaudio:$env:VCPKG_TRIPLET
+
+      # ──────────────────────────────────────────────────────────────────
+      - name: Configure (CMake)
+        shell: pwsh
+        run: |
+          cmake -S . -B build `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_DIR/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET="$env:VCPKG_TRIPLET" `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+            -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE
+
+      - name: Build (Release)
+        shell: pwsh
+        run: |
+          cmake --build build --config $env:BUILD_TYPE --parallel
+
+      # ──────────────────────────────────────────────────────────────────
+      # Assemble a portable, self-contained application folder.
+      - name: Locate build output
+        id: locate
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter "BassNuker.exe" |
+                 Where-Object { $_.FullName -match "Release" } |
+                 Select-Object -First 1
+          if (-not $exe) {
+            throw "BassNuker.exe not found under build/ (Release)."
+          }
+          Write-Host "Found executable: $($exe.FullName)"
+          echo "exe_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Create portable app folder
+        shell: pwsh
+        run: |
+          $pkgDir = "dist/BassNuker"
+          New-Item -ItemType Directory -Path $pkgDir -Force | Out-Null
+          Copy-Item "${{ steps.locate.outputs.exe_path }}" -Destination $pkgDir
+
+      - name: Run windeployqt (Qt runtime, plugins, DLLs)
+        shell: pwsh
+        run: |
+          $windeployqt = Join-Path $env:QT_ROOT_DIR "bin/windeployqt.exe"
+          & $windeployqt --release --no-translations --compiler-runtime "dist/BassNuker/BassNuker.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "windeployqt failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Copy non-Qt runtime dependencies (PortAudio)
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path "$env:VCPKG_DIR/installed/$env:VCPKG_TRIPLET/bin" `
+                 -Filter "portaudio*.dll" -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $dll) {
+            throw "portaudio.dll not found in vcpkg install tree."
+          }
+          Copy-Item $dll.FullName -Destination "dist/BassNuker"
+
+      - name: Include README / license
+        shell: pwsh
+        run: |
+          if (Test-Path "README.md") { Copy-Item "README.md" -Destination "dist/BassNuker" }
+          if (Test-Path "LICENSE")   { Copy-Item "LICENSE"   -Destination "dist/BassNuker" }
+
+      - name: Verify portable folder contents
+        shell: pwsh
+        run: |
+          Write-Host "── dist/BassNuker ──"
+          Get-ChildItem -Recurse "dist/BassNuker" | Select-Object FullName | Format-Table -AutoSize
+
+      # ──────────────────────────────────────────────────────────────────
+      - name: Compress portable folder to ZIP
+        id: zip
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_type == 'tag' && github.ref_name || format('run{0}', github.run_number) }}"
+          $zipName = "BassNuker-portable-win64-$version.zip"
+          Compress-Archive -Path "dist/BassNuker/*" -DestinationPath $zipName -Force
+          echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.zip.outputs.zip_name }}
+          path: ${{ steps.zip.outputs.zip_name }}
+          if-no-files-found: error
+          retention-days: 90
+
+      # ──────────────────────────────────────────────────────────────────
+      # On a tagged push (v*), also attach the portable zip to a GitHub
+      # Release so it has a permanent home beyond the 90-day Actions
+      # artifact retention window.
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.zip.outputs.zip_name }}
