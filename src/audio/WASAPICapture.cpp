@@ -18,6 +18,7 @@
 #include <combaseapi.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <mmreg.h>
 #include <functiondiscoverykeys_devpkey.h>
 
 template<typename T>
@@ -143,16 +144,36 @@ signals:
     void errorOccurred(const QString& msg);
 
 private:
+    // WASAPI's IAudioClient::GetMixFormat() almost always returns a
+    // WAVEFORMATEXTENSIBLE on modern Windows (wFormatTag == WAVE_FORMAT_EXTENSIBLE,
+    // typically 32-bit IEEE float). The *real* sample format lives in the
+    // extensible struct's SubFormat GUID, not in the outer wFormatTag/bps —
+    // those just describe the container. Reading wFormatTag directly and
+    // falling through to the bps==32 "PCM int32" branch reinterprets raw
+    // float32 bit patterns as integers, which sounds like loud broadband
+    // hiss/static. KSDATAFORMAT_SUBTYPE_PCM / _IEEE_FLOAT encode the classic
+    // format tag (1 / 3) in the GUID's first 4 bytes, so we can resolve the
+    // true tag without pulling in ksmedia.h.
+    static WORD effectiveFormatTag(const WAVEFORMATEX* fmt) {
+        if (fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+            fmt->cbSize >= (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX))) {
+            const auto* wfex = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(fmt);
+            return (WORD)wfex->SubFormat.Data1;
+        }
+        return fmt->wFormatTag;
+    }
+
     // Convert one WAVEFORMATEX frame to float32 stereo [-1, 1].
     static void convertFrame(const BYTE* src, WAVEFORMATEX* fmt,
                               UINT32 offset, float& l, float& r) {
         const WORD ch  = fmt->nChannels;
         const WORD bps = fmt->wBitsPerSample;
+        const WORD tag = effectiveFormatTag(fmt);
 
-        if (fmt->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
+        if (tag == WAVE_FORMAT_IEEE_FLOAT) {
             const float* fp = reinterpret_cast<const float*>(src) + offset * ch;
             l = fp[0]; r = (ch >= 2) ? fp[1] : fp[0];
-        } else if (fmt->wFormatTag == WAVE_FORMAT_PCM || bps == 16) {
+        } else if (tag == WAVE_FORMAT_PCM || bps == 16) {
             const int16_t* ip = reinterpret_cast<const int16_t*>(src) + offset * ch;
             l = ip[0] / 32768.f; r = (ch >= 2) ? ip[1] / 32768.f : l;
         } else if (bps == 24) {
