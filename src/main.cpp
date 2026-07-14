@@ -19,8 +19,10 @@ int main(int argc, char* argv[]) {
     // Set window icon
     app.setWindowIcon(QIcon(":/icons/icon128.png"));
 
-    // Use Segoe UI if available (Windows), otherwise fall back
+    // Use Segoe UI if available (Windows), otherwise fall back to a clean
+    // modern sans-serif so the UI reads consistently across platforms.
     QFont font("Segoe UI", 11);
+    font.setStyleStrategy(QFont::PreferAntialias);
     font.setHintingPreference(QFont::PreferFullHinting);
     app.setFont(font);
 

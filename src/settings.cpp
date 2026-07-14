@@ -43,10 +43,9 @@ void AppSettings::load() {
     LOAD_F(reverbModulationDepth, 55.f);
     LOAD_F(reverbModulationRate, 30.f);
     LOAD_F(reverbLowCut, 90.f);
-    LOAD_F(reverbDensity, 70.f);
+    LOAD_F(reverbDensity, 78.f);
     LOAD_F(reverbWetLevel, 100.f);
     LOAD_F(reverbDryLevel, 0.f);
-    LOAD_F(reverbHighCut, 9000.f);
 
     LOAD_B(eqOn, false);
     LOAD_S(eqPreset, "flat");
@@ -133,7 +132,6 @@ void AppSettings::save() const {
     SAVE(reverbStereoWidth); SAVE(reverbModulationDepth);
     SAVE(reverbModulationRate); SAVE(reverbLowCut);
     SAVE(reverbDensity); SAVE(reverbWetLevel); SAVE(reverbDryLevel);
-    SAVE(reverbHighCut);
     SAVE(eqOn); SAVE(eqPreset);
     q.beginWriteArray("eqBands");
     for (int i = 0; i < 10; ++i) {

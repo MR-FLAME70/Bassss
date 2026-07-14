@@ -54,27 +54,42 @@ void MainWindow::applyDarkTheme() {
     qApp->setStyleSheet(R"(
         QMainWindow, QWidget {
             background-color: #000000;
-            color: #ffffff;
-            font-family: "Segoe UI", Arial, sans-serif;
+            color: #f2f2f2;
+            font-family: "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
             font-size: 12px;
         }
         QToolTip {
-            background: #1a1a1a; color: #fff; border: 1px solid #333;
-            border-radius: 4px; padding: 4px 8px;
+            background: #1a1a1a; color: #f2f2f2; border: 1px solid #333;
+            border-radius: 5px; padding: 5px 9px;
         }
+        QLabel { background: transparent; }
+        QCheckBox { spacing: 8px; }
+        QCheckBox::indicator {
+            width: 15px; height: 15px; border-radius: 3px;
+            border: 1px solid #3a3a3a; background: #161616;
+        }
+        QCheckBox::indicator:checked { background: #e8e8e8; border-color: #e8e8e8; }
+        QLineEdit {
+            background: #131313; color: #f2f2f2; border: 1px solid #2a2a2a;
+            border-radius: 6px; padding: 4px 8px; selection-background-color: #3a3a3a;
+        }
+        QLineEdit:focus { border: 1px solid #565656; }
         QScrollBar:vertical {
-            background: #111; width: 6px; border-radius: 3px;
+            background: transparent; width: 8px; margin: 2px; border-radius: 4px;
         }
         QScrollBar::handle:vertical {
-            background: #333; border-radius: 3px;
+            background: #333; border-radius: 4px; min-height: 24px;
         }
+        QScrollBar::handle:vertical:hover { background: #4a4a4a; }
         QScrollBar:horizontal {
-            background: #111; height: 6px; border-radius: 3px;
+            background: transparent; height: 8px; margin: 2px; border-radius: 4px;
         }
         QScrollBar::handle:horizontal {
-            background: #333; border-radius: 3px;
+            background: #333; border-radius: 4px; min-width: 24px;
         }
-        QScrollBar::add-line, QScrollBar::sub-line { background: none; }
+        QScrollBar::handle:horizontal:hover { background: #4a4a4a; }
+        QScrollBar::add-line, QScrollBar::sub-line { background: none; height: 0; width: 0; }
+        QScrollBar::add-page, QScrollBar::sub-page { background: none; }
     )");
 }
 
@@ -101,23 +116,24 @@ void MainWindow::buildUI() {
     m_tabBar->setStyleSheet(R"(
         QTabBar {
             background: #0a0a0a;
-            border-bottom: 1px solid #222;
+            border-bottom: 1px solid #232323;
         }
         QTabBar::tab {
             background: transparent;
-            color: #888;
-            padding: 8px 18px;
+            color: #7a7a7a;
+            padding: 10px 20px;
             font-size: 12px;
+            letter-spacing: 0.3px;
             border: none;
-            border-radius: 0;
+            border-bottom: 2px solid transparent;
             margin-right: 2px;
         }
         QTabBar::tab:selected {
-            color: #8b5cf6;
-            border-bottom: 2px solid #8b5cf6;
-            font-weight: bold;
+            color: #ffffff;
+            border-bottom: 2px solid #e8e8e8;
+            font-weight: 600;
         }
-        QTabBar::tab:hover { color: #ccc; }
+        QTabBar::tab:hover:!selected { color: #d0d0d0; }
     )");
     connect(m_tabBar, &QTabBar::currentChanged, this, &MainWindow::onTabChanged);
     root->addWidget(m_tabBar);
@@ -172,7 +188,7 @@ QWidget* MainWindow::buildTitleBar() {
 
     // App title
     QLabel* title = new QLabel("Bass Nuker");
-    title->setStyleSheet("color:#8b5cf6; font-size:14px; font-weight:bold; letter-spacing:1px;");
+    title->setStyleSheet("color:#ffffff; font-size:14px; font-weight:600; letter-spacing:1.5px;");
     lay->addWidget(title);
 
     lay->addSpacing(10);
@@ -194,11 +210,12 @@ QWidget* MainWindow::buildTitleBar() {
     m_comboInput->setFixedWidth(185);
     m_comboInput->setFixedHeight(26);
     m_comboInput->setStyleSheet(
-        "QComboBox { background:#111; color:#ccc; border:1px solid #222; border-radius:4px;"
-        "padding:2px 6px; font-size:11px; }"
-        "QComboBox::drop-down { border:none; width:16px; }"
+        "QComboBox { background:#131313; color:#ccc; border:1px solid #262626; border-radius:5px;"
+        "padding:2px 8px; font-size:11px; }"
+        "QComboBox:hover { border:1px solid #3a3a3a; }"
+        "QComboBox::drop-down { border:none; width:18px; }"
         "QComboBox QAbstractItemView { background:#1a1a1a; color:#fff; border:1px solid #333;"
-        "selection-background-color:#8b5cf6; font-size:11px; }");
+        "selection-background-color:#333333; font-size:11px; outline:none; }");
     inLay->addWidget(m_comboInput);
     lay->addWidget(inGroup);
 
@@ -227,11 +244,13 @@ QWidget* MainWindow::buildTitleBar() {
     m_btnStart->setFixedSize(80, 28);
     m_btnStart->setStyleSheet(R"(
         QPushButton {
-            background: #8b5cf6; color: #fff; border: none;
-            border-radius: 6px; font-size: 12px; font-weight: bold;
+            background: #ececec; color: #0a0a0a; border: 1px solid #ececec;
+            border-radius: 6px; font-size: 12px; font-weight: 600;
         }
-        QPushButton:hover { background: #7c3aed; }
-        QPushButton:checked { background: #dc2626; }
+        QPushButton:hover    { background: #ffffff; border-color: #ffffff; }
+        QPushButton:pressed  { background: #c9c9c9; border-color: #c9c9c9; }
+        QPushButton:checked  { background: #dc2626; color: #fff; border-color: #dc2626; }
+        QPushButton:checked:hover { background: #ef4444; border-color: #ef4444; }
     )");
     m_btnStart->setCheckable(true);
     connect(m_btnStart, &QPushButton::clicked, this, &MainWindow::onStartStop);

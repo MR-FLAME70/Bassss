@@ -28,7 +28,11 @@ struct AppSettings {
     float reverbMix     = 74.f;    // % wet
     float reverbPredelay = 38.f;   // ms
     float reverbDiffuse = 78.f;    // %
-    float reverbToneHz  = 3600.f;  // High Cut Hz
+    float reverbToneHz  = 3600.f;  // High Cut Hz — single tone/high-cut control,
+                                    // shared by the Basic "Tone" slider and the
+                                    // Advanced "High Cut" slider (same field in
+                                    // the original extension: reverbFrequency /
+                                    // reverbHighCut both edit currentTone.toneHz).
     float reverbResonanceHz = 1000.f;
     float reverbResonanceQ  = 0.f;
     float songVolume    = 100.f;   // % dry song level
@@ -44,10 +48,9 @@ struct AppSettings {
     float reverbModulationDepth       = 55.f;   // %
     float reverbModulationRate        = 30.f;   // %
     float reverbLowCut                = 90.f;   // Hz
-    float reverbDensity               = 70.f;   // % (defaults same as hauntedcavernv2)
+    float reverbDensity               = 78.f;   // % (hauntedcavernv2 falls back to its own diffuse=78)
     float reverbWetLevel              = 100.f;  // %
     float reverbDryLevel              = 0.f;    // %
-    float reverbHighCut               = 9000.f; // Hz
 
     // ── Advanced audio modules ────────────────────────────────────────────────
     // EQ

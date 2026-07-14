@@ -59,74 +59,75 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
     volumeGain.store(s.volume / 100.f);
 
     // ── Reverb Engine ─────────────────────────────────────────────────────────
-    // Two modes:
+    // Matches offscreen.js exactly: there is a single hybrid reverb engine,
+    // always active with one unified parameter set — there is no separate
+    // "basic" vs "advanced" engine or parameter source.
     //
-    //  BASIC (reverbOn=true, reverbEngineOn=false)
-    //    Parameters come from the Live Tab preset controls.
-    //    Internal wet/dry: engine outputs 100% wet, outer dryGain/wetGain mix.
+    // reverbEngineOn ("Advanced Reverb Engine" toggle) does NOT switch which
+    // sliders feed the engine. Per pushSettings()'s reverbEngineBypass, when
+    // the toggle is off, the subset of fields present in REVERB_ENGINE_DEFAULTS
+    // (roomSize, earlyReflection*, lateReverbLevel, hfDamping, lfDamping,
+    // stereoWidth, modulationDepth/Rate, lowCut, wetLevel, dryLevel) is reset
+    // to neutral defaults so those sliders only affect audio when enabled.
+    // preDelay, decayTime, diffusion, highCut (Tone Hz) and density are NOT
+    // part of that bypass set and are always live, regardless of the toggle.
     //
-    //  ADVANCED (reverbEngineOn=true)
-    //    Parameters come from the Advanced Reverb Engine sliders.
-    //    Overrides the basic reverb when active; both may be on simultaneously
-    //    (advanced takes precedence for parameter routing).
-    //    Wet/Dry controlled entirely by the advanced Wet/Dry Level sliders:
-    //      - rp.wetLevel scales the reverb output
-    //      - outer dryGain passes the dry signal (no pre-delay on dry)
-    //      - outer wetGain = 1.0 (engine already at correct level)
-
-    const bool useAdvanced = s.reverbEngineOn;
-    const bool anyReverbOn = s.reverbOn || s.reverbEngineOn;
+    // The outer wet/dry bus (Effects Amount, Mix, Song Volume) is a separate,
+    // independent stage — see setReverbMix() in the original — gated solely
+    // by the basic Reverb on/off switch, never by reverbEngineOn.
 
     ReverbEngine::Params rp;
 
-    // ── Shared fields (both modes use the same DSP, same struct) ──────────────
-    rp.preDelay             = s.reverbPredelay / 1000.f;
-    rp.earlyReflectionDelay = s.reverbEarlyReflectionDelay / 1000.f;
-    rp.earlyReflectionLevel = s.reverbEarlyReflectionLevel / 100.f;
-    rp.lateReverbLevel      = s.reverbLateReverbLevel / 100.f;
-    rp.hfDamping            = s.reverbHfDamping / 100.f;
-    rp.lfDamping            = s.reverbLfDamping / 100.f;
-    rp.stereoWidth          = s.reverbStereoWidth / 100.f;
-    rp.density              = s.reverbDensity / 100.f;
-    rp.modulationDepth      = s.reverbModulationDepth / 100.f;
-    rp.modulationRate       = s.reverbModulationRate / 100.f;
-    rp.lowCut               = s.reverbLowCut;
+    // ── Always-live fields (not part of the REVERB_ENGINE_DEFAULTS bypass) ───
+    rp.preDelay  = s.reverbPredelay / 1000.f;
+    rp.decayTime = s.reverbDecay;
+    rp.diffusion = s.reverbDiffuse / 100.f;
+    rp.highCut   = s.reverbToneHz;   // single Tone/High-Cut control, always live
+    rp.density   = s.reverbDensity / 100.f;
 
-    if (useAdvanced) {
-        // ── ADVANCED MODE ─────────────────────────────────────────────────────
-        // Use the advanced reverb engine's own controls.
-        rp.roomSize  = s.reverbRoomSize;
-        rp.decayTime = s.reverbDecay;
-        rp.diffusion = s.reverbDiffuse / 100.f;
-        rp.highCut   = s.reverbHighCut;           // High Cut slider (not basic Tone)
-        // Engine outputs scaled wet; dry is handled by outer dryGain below.
-        rp.wetLevel  = s.reverbWetLevel / 100.f;
-        rp.dryLevel  = 0.f;
+    if (s.reverbEngineOn) {
+        // ── Advanced Reverb Engine ON: sliders are live ─────────────────────
+        rp.roomSize             = s.reverbRoomSize;
+        rp.earlyReflectionDelay = s.reverbEarlyReflectionDelay / 1000.f;
+        rp.earlyReflectionLevel = s.reverbEarlyReflectionLevel / 100.f;
+        rp.lateReverbLevel      = s.reverbLateReverbLevel / 100.f;
+        rp.hfDamping            = s.reverbHfDamping / 100.f;
+        rp.lfDamping            = s.reverbLfDamping / 100.f;
+        rp.stereoWidth          = s.reverbStereoWidth / 100.f;
+        rp.modulationDepth      = s.reverbModulationDepth / 100.f;
+        rp.modulationRate       = s.reverbModulationRate / 100.f;
+        rp.lowCut               = s.reverbLowCut;
+        rp.wetLevel             = s.reverbWetLevel / 100.f;
+        rp.dryLevel             = s.reverbDryLevel / 100.f;
     } else {
-        // ── BASIC MODE ────────────────────────────────────────────────────────
-        // Parameters driven by preset / Live Tab sliders.
-        rp.roomSize  = s.reverbRoomSize;
-        rp.decayTime = s.reverbDecay;
-        rp.diffusion = s.reverbDiffuse / 100.f;
-        rp.highCut   = s.reverbToneHz;            // Basic Tone Hz slider
-        rp.wetLevel  = (s.reverbMix / 100.f) * (s.reverbAmount / 100.f);
-        rp.dryLevel  = 0.f;                       // Dry handled by outer dryGain
+        // ── Advanced Reverb Engine OFF: bypass to REVERB_ENGINE_DEFAULTS ────
+        rp.roomSize             = 1.0f;   // reverbRoomSize
+        rp.earlyReflectionDelay = 0.f;    // reverbEarlyReflectionDelay: 0 ms
+        rp.earlyReflectionLevel = 0.35f;  // reverbEarlyReflectionLevel: 35 %
+        rp.lateReverbLevel      = 1.0f;   // reverbLateReverbLevel: 100 %
+        rp.hfDamping            = 0.f;    // reverbHfDamping: 0 %
+        rp.lfDamping            = 0.f;    // reverbLfDamping: 0 %
+        rp.stereoWidth          = 1.0f;   // reverbStereoWidth: 100 %
+        rp.modulationDepth      = 0.40f;  // reverbModulationDepth: 40 %
+        rp.modulationRate       = 0.35f;  // reverbModulationRate: 35 %
+        rp.lowCut               = 80.f;   // reverbLowCut: 80 Hz
+        rp.wetLevel             = 1.0f;   // reverbWetLevel: 100 %
+        rp.dryLevel             = 0.f;    // reverbDryLevel: 0 %
     }
 
     reverbEngine.setParams(rp);
-    reverbOn.store(anyReverbOn);
+    // Outer bus is gated solely by the basic Reverb toggle (setReverbMix's
+    // `on` argument is reverbOn — reverbEngineOn never enables/disables it).
+    reverbOn.store(s.reverbOn);
 
-    // ── Outer wet/dry gains (applied in processStereo after engine output) ───
-    if (useAdvanced) {
-        // Advanced: Dry Level slider controls the unprocessed dry signal.
-        // Wet Level is already baked into rp.wetLevel; outer wetGain = 1.
-        dryGain.store(s.reverbDryLevel / 100.f);
-        wetGain.store(1.f);
-    } else {
-        // Basic: derive from the Mix slider (same formula as the extension).
-        float reverbWet = s.reverbMix / 100.f;
-        dryGain.store(1.f - reverbWet * 0.5f);
-        wetGain.store(reverbWet);
+    // ── Outer wet/dry gains (offscreen.js setReverbMix) ───────────────────────
+    // wet = reverbOn ? (mix/100) * (amount/100) : 0
+    // dry = max(0, songVolume/100)   — independent of reverbOn/mix
+    {
+        float amount = std::clamp(s.reverbAmount, 0.f, 100.f) / 100.f;
+        float mix    = std::clamp(s.reverbMix,    0.f, 100.f) / 100.f;
+        wetGain.store(s.reverbOn ? mix * amount : 0.f);
+        dryGain.store(std::max(0.f, s.songVolume / 100.f));
     }
 
     // Resonance (on wet path after reverb)

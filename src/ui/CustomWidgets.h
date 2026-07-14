@@ -11,15 +11,16 @@
 #include <vector>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Dark-themed custom widgets matching popup.css exactly.
+// Monochrome dark-themed custom widgets — black / white / gray only.
 // Colours:
-//   background:     #000 / #0a0a0a
-//   card bg:        #111 / #1a1a1a / #0d0d0d
-//   accent purple:  #8b5cf6 (pill tab selected, toggle on, slider thumb)
-//   accent blue:    #6366f1
-//   text primary:   #fff
-//   text secondary: #aaa / #888
-//   border:         #333 / #222
+//   background:      #000 / #0a0a0a
+//   card bg:         #111 / #161616 / #0d0d0d
+//   accent (neutral): #e8e8e8 (selected tab, toggle on, slider thumb/fill)
+//   accent hover:     #ffffff
+//   text primary:    #fff
+//   text secondary:  #aaa / #888
+//   border:          #2a2a2a / #383838
+//   status (functional only, not decorative): #22c55e ok, #ef4444 stop/clip
 // ──────────────────────────────────────────────────────────────────────────────
 
 // ── Toggle switch (CSS custom toggle) ─────────────────────────────────────────

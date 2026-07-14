@@ -36,7 +36,7 @@ void AdvancedTab::buildUI() {
         sl  = new DarkSlider(Qt::Horizontal);
         sl->setRangeF(lo, hi, step);
         lbl = new QLabel();
-        lbl->setStyleSheet("color:#8b5cf6; font-size:11px;");
+        lbl->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:500;");
         lbl->setFixedWidth(72);
     };
 
@@ -79,10 +79,11 @@ void AdvancedTab::buildUI() {
 
         comboSpeakerMode = new QComboBox();
         comboSpeakerMode->setStyleSheet(
-            "QComboBox { background:#1a1a1a; color:#fff; border:1px solid #333;"
-            "border-radius:6px; padding:4px 8px; font-size:11px; }"
+            "QComboBox { background:#171717; color:#f2f2f2; border:1px solid #2a2a2a;"
+            "border-radius:6px; padding:5px 9px; font-size:11px; }"
+            "QComboBox:hover { border:1px solid #3a3a3a; }"
             "QComboBox QAbstractItemView { background:#1a1a1a; color:#fff; "
-            "border:1px solid #333; selection-background-color:#8b5cf6; }");
+            "border:1px solid #333; selection-background-color:#333333; outline:none; }");
         for (auto* m : {"headphones","stereo","2.1","4.0","4.1","5.1","7.1"})
             comboSpeakerMode->addItem(m);
         cl->addWidget(comboSpeakerMode);
@@ -137,11 +138,14 @@ void AdvancedTab::buildUI() {
         }
 
         // ── Section: Room character ───────────────────────────────────────────
+        // Slider ranges mirror popup.html's widened "overdrive" headroom;
+        // ReverbEngine::setParams still clamps to the real DSP-safe range
+        // (roomSize 0.25–3.0, density/mod 0–100 %, etc.).
         cl->addWidget(makeDimLabel("Room Character"));
-        makeRow(0.25, 3.0,  0.05, slRoomSize, lblRoomSize);
-        makeRow(0,    100,  1,    slDensity,  lblDensity);
-        makeRow(0,    100,  1,    slModDepth, lblModDepth);
-        makeRow(0,    100,  1,    slModRate,  lblModRate);
+        makeRow(0.25, 30,   0.05, slRoomSize, lblRoomSize);
+        makeRow(0,    1000, 1,    slDensity,  lblDensity);
+        makeRow(0,    1000, 1,    slModDepth, lblModDepth);
+        makeRow(0,    1000, 1,    slModRate,  lblModRate);
         addRow(cl, "Room Size",     slRoomSize, lblRoomSize);
         addRow(cl, "Density %",     slDensity,  lblDensity);
         addRow(cl, "Mod Depth %",   slModDepth, lblModDepth);
@@ -150,24 +154,24 @@ void AdvancedTab::buildUI() {
         // ── Section: Early Reflections ────────────────────────────────────────
         cl->addSpacing(6);
         cl->addWidget(makeDimLabel("Early Reflections"));
-        makeRow(0,    500,  5,    slERDelay,  lblERDelay);   // 0–500 ms
-        makeRow(0,    100,  1,    slERLevel,  lblERLevel);
+        makeRow(0,    2000, 1,    slERDelay,  lblERDelay);   // 0–2000 ms
+        makeRow(0,    1000, 1,    slERLevel,  lblERLevel);
         addRow(cl, "ER Delay ms",   slERDelay,  lblERDelay);
         addRow(cl, "ER Level %",    slERLevel,  lblERLevel);
 
         // ── Section: Late Tail ────────────────────────────────────────────────
         cl->addSpacing(6);
         cl->addWidget(makeDimLabel("Late Tail"));
-        makeRow(0, 100, 1, slLateLevel, lblLateLevel);
+        makeRow(0, 1000, 1, slLateLevel, lblLateLevel);
         addRow(cl, "Late Reverb %", slLateLevel, lblLateLevel);
 
         // ── Section: Spectral Shaping ─────────────────────────────────────────
         cl->addSpacing(6);
         cl->addWidget(makeDimLabel("Spectral Shaping"));
-        makeRow(0,    100,    1,   slHfDamp,  lblHfDamp);
-        makeRow(0,    100,    1,   slLfDamp,  lblLfDamp);
-        makeRow(20,   500,    5,   slLowCut,  lblLowCut);
-        makeRow(1000, 20000, 100,  slHighCut, lblHighCut);
+        makeRow(0,   1000,   1,   slHfDamp,  lblHfDamp);
+        makeRow(0,   1000,   1,   slLfDamp,  lblLfDamp);
+        makeRow(20,  20000,  5,   slLowCut,  lblLowCut);
+        makeRow(200, 200000, 100, slHighCut, lblHighCut);
         addRow(cl, "HF Damping %",  slHfDamp,  lblHfDamp);
         addRow(cl, "LF Damping %",  slLfDamp,  lblLfDamp);
         addRow(cl, "Low Cut Hz",    slLowCut,  lblLowCut);
@@ -176,9 +180,9 @@ void AdvancedTab::buildUI() {
         // ── Section: Stereo & Mix ─────────────────────────────────────────────
         cl->addSpacing(6);
         cl->addWidget(makeDimLabel("Stereo & Mix"));
-        makeRow(0, 200, 1,  slRevWidth, lblRevWidth);
-        makeRow(0, 100, 1,  slWetLevel, lblWetLevel);
-        makeRow(0, 100, 1,  slDryLevel, lblDryLevel);
+        makeRow(0, 2000, 1,  slRevWidth, lblRevWidth);
+        makeRow(0, 1000, 1,  slWetLevel, lblWetLevel);
+        makeRow(0, 1000, 1,  slDryLevel, lblDryLevel);
         addRow(cl, "Stereo Width %", slRevWidth, lblRevWidth);
         addRow(cl, "Wet Level %",    slWetLevel, lblWetLevel);
         addRow(cl, "Dry Level %",    slDryLevel, lblDryLevel);
@@ -254,7 +258,9 @@ void AdvancedTab::connectAll() {
     bindSlider(slHfDamp,   lblHfDamp,   " %",   0, [this](float v){ m_settings.reverbHfDamping           = v; });
     bindSlider(slLfDamp,   lblLfDamp,   " %",   0, [this](float v){ m_settings.reverbLfDamping           = v; });
     bindSlider(slLowCut,   lblLowCut,   " Hz",  0, [this](float v){ m_settings.reverbLowCut              = v; });
-    bindSlider(slHighCut,  lblHighCut,  " Hz",  0, [this](float v){ m_settings.reverbHighCut             = v; });
+    // High Cut is the same underlying control as the Basic tab's Tone Hz
+    // slider (reverbToneHz) in the original extension — not a separate field.
+    bindSlider(slHighCut,  lblHighCut,  " Hz",  0, [this](float v){ m_settings.reverbToneHz              = v; });
     // Stereo & mix
     bindSlider(slRevWidth, lblRevWidth, " %",   0, [this](float v){ m_settings.reverbStereoWidth         = v; });
     bindSlider(slWetLevel, lblWetLevel, " %",   0, [this](float v){ m_settings.reverbWetLevel            = v; });
@@ -303,7 +309,7 @@ void AdvancedTab::refreshFromSettings(const AppSettings& s) {
     slHfDamp   ->setValueF(s.reverbHfDamping);               lblHfDamp   ->setText(QString::number((int)s.reverbHfDamping)            +" %");
     slLfDamp   ->setValueF(s.reverbLfDamping);               lblLfDamp   ->setText(QString::number((int)s.reverbLfDamping)            +" %");
     slLowCut   ->setValueF(s.reverbLowCut);                  lblLowCut   ->setText(QString::number((int)s.reverbLowCut)               +" Hz");
-    slHighCut  ->setValueF(s.reverbHighCut);                 lblHighCut  ->setText(QString::number((int)s.reverbHighCut)              +" Hz");
+    slHighCut  ->setValueF(s.reverbToneHz);                  lblHighCut  ->setText(QString::number((int)s.reverbToneHz)               +" Hz");
     slRevWidth ->setValueF(s.reverbStereoWidth);             lblRevWidth ->setText(QString::number((int)s.reverbStereoWidth)          +" %");
     slWetLevel ->setValueF(s.reverbWetLevel);                lblWetLevel ->setText(QString::number((int)s.reverbWetLevel)             +" %");
     slDryLevel ->setValueF(s.reverbDryLevel);                lblDryLevel ->setText(QString::number((int)s.reverbDryLevel)             +" %");

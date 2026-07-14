@@ -31,10 +31,11 @@ void AdvancedAudioTab::buildUI() {
         toggleEq   = new ToggleSwitch();
         comboEqPreset = new QComboBox();
         comboEqPreset->setStyleSheet(
-            "QComboBox { background:#1a1a1a; color:#fff; border:1px solid #333;"
-            "border-radius:6px; padding:4px 8px; font-size:11px; }"
+            "QComboBox { background:#171717; color:#f2f2f2; border:1px solid #2a2a2a;"
+            "border-radius:6px; padding:5px 9px; font-size:11px; }"
+            "QComboBox:hover { border:1px solid #3a3a3a; }"
             "QComboBox QAbstractItemView { background:#1a1a1a; color:#fff; "
-            "border:1px solid #333; selection-background-color:#8b5cf6; }");
+            "border:1px solid #333; selection-background-color:#333333; outline:none; }");
         for (auto* preset : {"flat","bassboost","vocal","rock","pop","edm","cinema","gaming"})
             comboEqPreset->addItem(preset);
         hdr->addWidget(makeLabel("10-Band EQ", 12, true));
@@ -50,7 +51,7 @@ void AdvancedAudioTab::buildUI() {
             auto* s = new DarkSlider(Qt::Vertical);
             s->setRangeF(-12, 12, 0.5);
             s->setFixedHeight(80);
-            auto* lbl = makeLabel("0", 10, false, "#8b5cf6");
+            auto* lbl = makeLabel("0", 10, false, "#d0d0d0");
             lbl->setAlignment(Qt::AlignHCenter);
             auto* freq = makeDimLabel(EQ_FREQS[i]);
             freq->setAlignment(Qt::AlignHCenter);
@@ -79,10 +80,10 @@ void AdvancedAudioTab::buildUI() {
         grid->setSpacing(8);
         sliderDynSens = new DarkSlider(Qt::Horizontal);
         sliderDynSens->setRangeF(0, 100, 1);
-        lblDynSens = makeLabel("50 %", 11, false, "#8b5cf6");
+        lblDynSens = makeLabel("50 %", 11, false, "#d0d0d0");
         sliderDynStr  = new DarkSlider(Qt::Horizontal);
         sliderDynStr->setRangeF(0, 100, 1);
-        lblDynStr  = makeLabel("50 %", 11, false, "#8b5cf6");
+        lblDynStr  = makeLabel("50 %", 11, false, "#d0d0d0");
         grid->addWidget(makeDimLabel("Sensitivity"), 0,0);
         grid->addWidget(sliderDynSens,                0,1);
         grid->addWidget(lblDynSens,                   0,2);
@@ -110,7 +111,7 @@ void AdvancedAudioTab::buildUI() {
             row->addWidget(makeDimLabel(lbl), 1);
             sl = new DarkSlider(Qt::Horizontal);
             sl->setRangeF(lo, hi, step);
-            vallbl = makeLabel("", 11, false, "#8b5cf6");
+            vallbl = makeLabel("", 11, false, "#d0d0d0");
             vallbl->setFixedWidth(70);
             row->addWidget(sl, 3);
             row->addWidget(vallbl, 1);
@@ -139,10 +140,10 @@ void AdvancedAudioTab::buildUI() {
 
         sliderLimThr = new DarkSlider(Qt::Horizontal);
         sliderLimThr->setRangeF(-30, 0, 0.5);
-        lblLimThr = makeLabel("-3 dB", 11, false, "#8b5cf6");
+        lblLimThr = makeLabel("-3 dB", 11, false, "#d0d0d0");
         sliderLimRel = new DarkSlider(Qt::Horizontal);
         sliderLimRel->setRangeF(5, 500, 5);
-        lblLimRel = makeLabel("50 ms", 11, false, "#8b5cf6");
+        lblLimRel = makeLabel("50 ms", 11, false, "#d0d0d0");
 
         auto add = [&](const char* name, QSlider* sl, QLabel* vl) {
             auto* row = new QHBoxLayout();
@@ -168,7 +169,7 @@ void AdvancedAudioTab::buildUI() {
         cl->addLayout(hdr);
         sliderWidth = new DarkSlider(Qt::Horizontal);
         sliderWidth->setRangeF(0, 200, 1);
-        lblWidth = makeLabel("100 %", 11, false, "#8b5cf6");
+        lblWidth = makeLabel("100 %", 11, false, "#d0d0d0");
         auto* row = new QHBoxLayout();
         row->addWidget(sliderWidth, 4); row->addWidget(lblWidth, 1);
         cl->addLayout(row);
@@ -187,7 +188,7 @@ void AdvancedAudioTab::buildUI() {
         cl->addLayout(hdr);
         sliderPitch = new DarkSlider(Qt::Horizontal);
         sliderPitch->setRangeF(-12, 12, 0.5);
-        lblPitch = makeLabel("0 st", 11, false, "#8b5cf6");
+        lblPitch = makeLabel("0 st", 11, false, "#d0d0d0");
         auto* row = new QHBoxLayout();
         row->addWidget(sliderPitch, 4); row->addWidget(lblPitch, 1);
         cl->addLayout(row);

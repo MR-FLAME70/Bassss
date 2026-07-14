@@ -35,13 +35,14 @@ void FileTab::buildUI() {
         cl->addWidget(makeLabel("Input File", 12, true));
         auto* row = new QHBoxLayout();
         lblInputPath = new QLabel("(none selected)");
-        lblInputPath->setStyleSheet("color:#888; font-size:11px; background:#111; "
-                                    "border:1px solid #222; border-radius:4px; padding:4px 8px;");
+        lblInputPath->setStyleSheet("color:#999; font-size:11px; background:#131313; "
+                                    "border:1px solid #262626; border-radius:6px; padding:6px 10px;");
         btnBrowseIn  = new QPushButton("Browse…");
         btnBrowseIn->setStyleSheet(
-            "QPushButton { background:#1a1a1a; color:#8b5cf6; border:1px solid #8b5cf6;"
-            "border-radius:6px; padding:6px 14px; font-size:12px; }"
-            "QPushButton:hover { background:#2a2a2a; }");
+            "QPushButton { background:#171717; color:#e8e8e8; border:1px solid #3a3a3a;"
+            "border-radius:6px; padding:7px 16px; font-size:12px; font-weight:500; }"
+            "QPushButton:hover { background:#232323; border-color:#565656; }"
+            "QPushButton:pressed { background:#0d0d0d; }");
         row->addWidget(lblInputPath, 1);
         row->addWidget(btnBrowseIn);
         cl->addLayout(row);
@@ -55,13 +56,14 @@ void FileTab::buildUI() {
         cl->addWidget(makeLabel("Output File", 12, true));
         auto* row = new QHBoxLayout();
         lblOutputPath = new QLabel("(none selected)");
-        lblOutputPath->setStyleSheet("color:#888; font-size:11px; background:#111; "
-                                     "border:1px solid #222; border-radius:4px; padding:4px 8px;");
+        lblOutputPath->setStyleSheet("color:#999; font-size:11px; background:#131313; "
+                                     "border:1px solid #262626; border-radius:6px; padding:6px 10px;");
         btnBrowseOut = new QPushButton("Browse…");
         btnBrowseOut->setStyleSheet(
-            "QPushButton { background:#1a1a1a; color:#8b5cf6; border:1px solid #8b5cf6;"
-            "border-radius:6px; padding:6px 14px; font-size:12px; }"
-            "QPushButton:hover { background:#2a2a2a; }");
+            "QPushButton { background:#171717; color:#e8e8e8; border:1px solid #3a3a3a;"
+            "border-radius:6px; padding:7px 16px; font-size:12px; font-weight:500; }"
+            "QPushButton:hover { background:#232323; border-color:#565656; }"
+            "QPushButton:pressed { background:#0d0d0d; }");
         row->addWidget(lblOutputPath, 1);
         row->addWidget(btnBrowseOut);
         cl->addLayout(row);
@@ -71,27 +73,31 @@ void FileTab::buildUI() {
     // Format note
     comboFormat = new QComboBox();
     comboFormat->addItem("32-bit float WAV (lossless)");
-    comboFormat->setStyleSheet("QComboBox { background:#1a1a1a; color:#fff; border:1px solid #333;"
-                                "border-radius:6px; padding:4px 8px; font-size:12px; }"
+    comboFormat->setStyleSheet("QComboBox { background:#171717; color:#f2f2f2; border:1px solid #2a2a2a;"
+                                "border-radius:6px; padding:5px 9px; font-size:12px; }"
+                                "QComboBox:hover { border:1px solid #3a3a3a; }"
                                 "QComboBox QAbstractItemView { background:#1a1a1a; color:#fff; "
-                                "border:1px solid #333; selection-background-color:#8b5cf6; }");
+                                "border:1px solid #333; selection-background-color:#333333; outline:none; }");
     lay->addWidget(comboFormat);
 
     // Process
     btnProcess = new QPushButton("⚡ Process File");
     btnProcess->setStyleSheet(
-        "QPushButton { background:#8b5cf6; color:#fff; border:none; border-radius:8px;"
-        "padding:10px 24px; font-size:13px; font-weight:bold; }"
-        "QPushButton:hover { background:#7c3aed; }"
-        "QPushButton:disabled { background:#333; color:#666; }");
+        "QPushButton { background:#ececec; color:#0a0a0a; border:1px solid #ececec; border-radius:8px;"
+        "padding:11px 26px; font-size:13px; font-weight:600; letter-spacing:0.2px; }"
+        "QPushButton:hover { background:#ffffff; border-color:#ffffff; }"
+        "QPushButton:pressed { background:#c9c9c9; border-color:#c9c9c9; }"
+        "QPushButton:disabled { background:#222; color:#555; border-color:#222; }");
     lay->addWidget(btnProcess);
 
     progressBar = new QProgressBar();
     progressBar->setRange(0,100);
     progressBar->setValue(0);
+    progressBar->setFixedHeight(8);
+    progressBar->setTextVisible(false);
     progressBar->setStyleSheet(
-        "QProgressBar { background:#111; border:1px solid #222; border-radius:4px; color:#fff; }"
-        "QProgressBar::chunk { background:#8b5cf6; border-radius:4px; }");
+        "QProgressBar { background:#131313; border:1px solid #262626; border-radius:4px; }"
+        "QProgressBar::chunk { background:#e8e8e8; border-radius:4px; }");
     lay->addWidget(progressBar);
 
     lblStatus = makeLabel("Ready", 11, false, "#888");
@@ -144,7 +150,7 @@ void FileTab::onProcess() {
     }
     btnProcess->setEnabled(false);
     lblStatus->setText("Processing…");
-    lblStatus->setStyleSheet("color: #8b5cf6;");
+    lblStatus->setStyleSheet("color: #cfcfcf;");
     progressBar->setValue(0);
 
     bool ok = processFile();

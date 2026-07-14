@@ -14,11 +14,13 @@ ToggleSwitch::ToggleSwitch(QWidget* parent) : QWidget(parent) {
     setFixedSize(44, 24);
     setCursor(Qt::PointingHandCursor);
     connect(&m_anim, &QTimer::timeout, this, [this]{
-        float speed = 3.f;
-        if (std::abs(m_thumbX - m_targetX) < speed) {
+        // Ease-out: step proportionally to remaining distance for a softer,
+        // more natural settle instead of a constant-speed slide.
+        float remaining = m_targetX - m_thumbX;
+        if (std::abs(remaining) < 0.4f) {
             m_thumbX = m_targetX; m_anim.stop();
         } else {
-            m_thumbX += (m_thumbX < m_targetX) ? speed : -speed;
+            m_thumbX += remaining * 0.35f;
         }
         update();
     });
@@ -36,13 +38,16 @@ void ToggleSwitch::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    QColor track = m_checked ? QColor(0x8b,0x5c,0xf6) : QColor(0x33,0x33,0x33);
+    QColor track = m_checked ? QColor(0xe8,0xe8,0xe8) : QColor(0x2a,0x2a,0x2a);
+    p.setPen(QPen(QColor(m_checked ? 0xe8 : 0x3a, m_checked ? 0xe8 : 0x3a, m_checked ? 0xe8 : 0x3a), 1));
     p.setBrush(track);
-    p.setPen(Qt::NoPen);
-    p.drawRoundedRect(0, 4, 44, 16, 8, 8);
+    p.drawRoundedRect(QRectF(0.5, 4.5, 43, 15), 7.5, 7.5);
 
-    // Thumb
-    p.setBrush(Qt::white);
+    // Thumb — subtle drop shadow for depth, plain white face
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0,0,0,60));
+    p.drawEllipse(QRectF(m_thumbX, 3, 20, 20));
+    p.setBrush(m_checked ? Qt::white : QColor(0xcf,0xcf,0xcf));
     p.drawEllipse(QRectF(m_thumbX, 2, 20, 20));
 }
 
@@ -56,21 +61,27 @@ void ToggleSwitch::mousePressEvent(QMouseEvent*) {
 DarkSlider::DarkSlider(Qt::Orientation o, QWidget* parent) : QSlider(o, parent) {
     setStyleSheet(R"(
         QSlider::groove:horizontal {
-            background: #222; height: 4px; border-radius: 2px;
+            background: #1c1c1c; height: 4px; border-radius: 2px;
+            border: 1px solid #2a2a2a;
         }
         QSlider::groove:vertical {
-            background: #222; width: 4px; border-radius: 2px;
+            background: #1c1c1c; width: 4px; border-radius: 2px;
+            border: 1px solid #2a2a2a;
         }
         QSlider::handle:horizontal {
-            background: #8b5cf6; width: 16px; height: 16px;
-            border-radius: 8px; margin: -6px 0;
+            background: #e8e8e8; width: 15px; height: 15px;
+            border: 1px solid #050505; border-radius: 8px; margin: -6px 0;
         }
         QSlider::handle:vertical {
-            background: #8b5cf6; width: 16px; height: 16px;
-            border-radius: 8px; margin: 0 -6px;
+            background: #e8e8e8; width: 15px; height: 15px;
+            border: 1px solid #050505; border-radius: 8px; margin: 0 -6px;
         }
-        QSlider::sub-page:horizontal { background: #8b5cf6; border-radius: 2px; }
-        QSlider::add-page:vertical   { background: #8b5cf6; border-radius: 2px; }
+        QSlider::handle:hover    { background: #ffffff; }
+        QSlider::handle:pressed  { background: #cfcfcf; }
+        QSlider::sub-page:horizontal { background: #9a9a9a; border-radius: 2px; }
+        QSlider::add-page:vertical   { background: #9a9a9a; border-radius: 2px; }
+        QSlider::add-page:horizontal { background: #1c1c1c; border-radius: 2px; }
+        QSlider::sub-page:vertical   { background: #1c1c1c; border-radius: 2px; }
     )");
     setRange(0, 10000);
 }
@@ -113,18 +124,18 @@ void DarkKnob::paintEvent(QPaintEvent*) {
 
     QRectF rect(4,4,52,52);
     // Track
-    p.setPen(QPen(QColor(0x33,0x33,0x33), 5));
+    p.setPen(QPen(QColor(0x2a,0x2a,0x2a), 5));
     p.setBrush(Qt::NoBrush);
     p.drawArc(rect, 225*16, -270*16);
 
     // Value arc
     double norm = (vhi>vlo) ? (val-vlo)/(vhi-vlo) : 0.0;
-    p.setPen(QPen(QColor(0x8b,0x5c,0xf6), 5));
+    p.setPen(QPen(QColor(0xe8,0xe8,0xe8), 5));
     p.drawArc(rect, 225*16, (int)(-norm*270.0*16));
 
     // Centre
-    p.setBrush(QColor(0x1a,0x1a,0x1a));
-    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0x17,0x17,0x17));
+    p.setPen(QPen(QColor(0x2a,0x2a,0x2a), 1));
     p.drawEllipse(rect.adjusted(8,8,-8,-8));
 
     // Indicator line
@@ -262,8 +273,8 @@ void CollapsibleSection::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing);
 
     // Header bar
-    p.fillRect(0,0,width(),22, QColor(0x1a,0x1a,0x1a));
-    p.setPen(QColor(0x33,0x33,0x33));
+    p.fillRect(0,0,width(),22, QColor(0x18,0x18,0x18));
+    p.setPen(QColor(0x2a,0x2a,0x2a));
     p.drawLine(0,22, width(),22);
 
     // Title
@@ -291,15 +302,16 @@ void CollapsibleSection::mousePressEvent(QMouseEvent* e) {
 // DarkCard
 // ──────────────────────────────────────────────────────────────────────────────
 DarkCard::DarkCard(QWidget* parent) : QWidget(parent) {
-    setContentsMargins(12,12,12,12);
+    setContentsMargins(16,16,16,16);
 }
 
 void DarkCard::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
+    QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath path;
-    path.addRoundedRect(rect(), 8, 8);
-    p.fillPath(path, QColor(0x11,0x11,0x11));
-    p.setPen(QPen(QColor(0x22,0x22,0x22), 1));
+    path.addRoundedRect(r, 10, 10);
+    p.fillPath(path, QColor(0x12,0x12,0x12));
+    p.setPen(QPen(QColor(0x28,0x28,0x28), 1));
     p.drawPath(path);
 }
