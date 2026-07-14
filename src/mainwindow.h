@@ -47,6 +47,7 @@ protected:
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
+    void paintEvent(QPaintEvent*) override;
 
 private slots:
     void onTabChanged(int idx);
@@ -71,6 +72,11 @@ private:
     // Title bar drag
     QPoint m_dragStart;
     bool   m_dragging = false;
+
+    // Window corner radius — shared by the top-level paint fill and the
+    // title/status bar chrome so their rounded corners align exactly and
+    // read as one continuous anti-aliased edge instead of a boxy frame.
+    static constexpr int kCornerRadius = 12;
 
     // UI
     QWidget*        m_titleBar;

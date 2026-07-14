@@ -32,7 +32,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     setFixedSize(860, 600);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
-    setAttribute(Qt::WA_TranslucentBackground, false);
+    // Frameless windows are square by default; a translucent surface lets us
+    // paint our own anti-aliased rounded-rect background in paintEvent() and
+    // leave the true corners fully transparent instead of hard-edged.
+    setAttribute(Qt::WA_TranslucentBackground, true);
 
     m_proc    = new AudioProcessor();
     m_capture = new AudioCapture(m_proc, this);
@@ -41,6 +44,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             this,      &MainWindow::onAudioError);
 
     applyDarkTheme();
+    // Override the global QWidget{background-color:#000000} rule for just
+    // this top-level window so translucency actually shows; the rounded
+    // fill itself is painted in paintEvent().
+    setStyleSheet("background: transparent;");
     buildUI();
 
     m_proc->applySettings(globalSettings());
@@ -101,6 +108,9 @@ void MainWindow::applyDarkTheme() {
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::buildUI() {
     auto* central = new QWidget();
+    // Transparent so MainWindow's own rounded-rect paint (behind this widget)
+    // shows through at the corners instead of a flat black rectangle.
+    central->setStyleSheet("background: transparent;");
     setCentralWidget(central);
 
     auto* root = new QVBoxLayout(central);
@@ -180,7 +190,12 @@ void MainWindow::buildUI() {
 QWidget* MainWindow::buildTitleBar() {
     m_titleBar = new QWidget();
     m_titleBar->setFixedHeight(46);
-    m_titleBar->setStyleSheet("background: #0a0a0a; border-bottom: 1px solid #1a1a1a;");
+    // Round only the top two corners so they line up exactly with the
+    // window's own rounded corners painted behind it.
+    m_titleBar->setStyleSheet(QString(
+        "background: #0a0a0a; border-bottom: 1px solid #1a1a1a;"
+        "border-top-left-radius: %1px; border-top-right-radius: %1px;"
+    ).arg(kCornerRadius));
 
     auto* lay = new QHBoxLayout(m_titleBar);
     lay->setContentsMargins(12,0,8,0);
@@ -340,7 +355,11 @@ QWidget* MainWindow::buildTitleBar() {
 QWidget* MainWindow::buildStatusBar() {
     auto* bar = new QWidget();
     bar->setFixedHeight(22);
-    bar->setStyleSheet("background: #0a0a0a; border-top: 1px solid #1a1a1a;");
+    // Round only the bottom two corners, mirroring the title bar's top ones.
+    bar->setStyleSheet(QString(
+        "background: #0a0a0a; border-top: 1px solid #1a1a1a;"
+        "border-bottom-left-radius: %1px; border-bottom-right-radius: %1px;"
+    ).arg(kCornerRadius));
     auto* lay = new QHBoxLayout(bar);
     lay->setContentsMargins(12,0,12,0);
 
@@ -619,6 +638,28 @@ void MainWindow::mouseMoveEvent(QMouseEvent* e) {
 
 void MainWindow::mouseReleaseEvent(QMouseEvent*) {
     m_dragging = false;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Rounded window background
+//
+// With WA_TranslucentBackground set, the OS surface is fully transparent by
+// default, so we paint our own anti-aliased rounded-rect fill + hairline
+// border here. The central widget and the title/status bars are all set to
+// transparent/matching corner radii so this shows through seamlessly at the
+// four corners instead of a hard rectangular edge.
+// ──────────────────────────────────────────────────────────────────────────────
+void MainWindow::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    QPainterPath path;
+    path.addRoundedRect(r, kCornerRadius, kCornerRadius);
+
+    p.fillPath(path, QColor(0x00,0x00,0x00));
+    p.setPen(QPen(QColor(0x2a,0x2a,0x2a), 1));
+    p.drawPath(path);
 }
 
 void MainWindow::closeEvent(QCloseEvent* e) {
