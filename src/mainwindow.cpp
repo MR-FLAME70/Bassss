@@ -1,6 +1,5 @@
 #include "mainwindow.h"
 #include "ui/LiveTab.h"
-#include "ui/FileTab.h"
 #include "ui/AdvancedTab.h"
 #include "ui/AdvancedAudioTab.h"
 #include <QVBoxLayout>
@@ -19,9 +18,13 @@
 
 // ── Data roles for device combo boxes ─────────────────────────────────────────
 // UserRole+0 = device ID string (QString)
-// UserRole+1 = device type string: "loopback" | "microphone"  (input only)
-static const int kRoleDeviceId   = Qt::UserRole + 0;
-static const int kRoleDeviceType = Qt::UserRole + 1;
+// UserRole+1 = audio source mode string: "playback" | "microphone" (source combo only)
+static const int kRoleDeviceId    = Qt::UserRole + 0;
+static const int kRoleSourceMode  = Qt::UserRole + 1;
+
+// Stack page indices in m_deviceStack
+static const int kStackPageMic      = 0;
+static const int kStackPagePlayback = 1;
 
 // ──────────────────────────────────────────────────────────────────────────────
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -108,11 +111,15 @@ void MainWindow::buildUI() {
     root->addWidget(buildTitleBar());
 
     // 2. Tab bar
+    // Now that File Export is gone, only 3 tabs remain. Expand them to share
+    // the full title-bar width evenly instead of clumping left with a dead
+    // gap on the right, and center each tab's contents for a balanced look.
     m_tabBar = new QTabBar();
     m_tabBar->addTab("🎵 Live Tab Audio");
-    m_tabBar->addTab("📁 File Export");
     m_tabBar->addTab("⚙ Advanced");
     m_tabBar->addTab("🎚 Advanced Audio");
+    m_tabBar->setExpanding(true);
+    m_tabBar->setElideMode(Qt::ElideNone);
     m_tabBar->setStyleSheet(R"(
         QTabBar {
             background: #0a0a0a;
@@ -127,6 +134,7 @@ void MainWindow::buildUI() {
             border: none;
             border-bottom: 2px solid transparent;
             margin-right: 2px;
+            alignment: center;
         }
         QTabBar::tab:selected {
             color: #ffffff;
@@ -141,11 +149,9 @@ void MainWindow::buildUI() {
     // 3. Tab content (stacked)
     auto* stack = new QStackedWidget();
     m_liveTab      = new LiveTab(m_proc);
-    m_fileTab      = new FileTab(m_proc);
     m_advTab       = new AdvancedTab();
     m_advAudioTab  = new AdvancedAudioTab();
     stack->addWidget(m_liveTab);
-    stack->addWidget(m_fileTab);
     stack->addWidget(m_advTab);
     stack->addWidget(m_advAudioTab);
     m_stack = stack;
@@ -164,7 +170,6 @@ void MainWindow::buildUI() {
 
     const auto& s = globalSettings();
     m_liveTab->refreshFromSettings(s);
-    m_fileTab->refreshFromSettings(s);
     m_advTab->refreshFromSettings(s);
     m_advAudioTab->refreshFromSettings(s);
 }
@@ -193,31 +198,67 @@ QWidget* MainWindow::buildTitleBar() {
 
     lay->addSpacing(10);
 
-    // ── Input Device ─────────────────────────────────────────────────────────
-    // Shows both render (playback) endpoints for loopback capture and
-    // capture (microphone) endpoints for direct mic input.
-    auto* inGroup = new QWidget();
-    inGroup->setStyleSheet("background:transparent;");
-    auto* inLay = new QVBoxLayout(inGroup);
-    inLay->setContentsMargins(0,0,0,0);
-    inLay->setSpacing(1);
-
-    auto* inLabel = new QLabel("Input Source");
-    inLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
-    inLay->addWidget(inLabel);
-
-    m_comboInput = new QComboBox();
-    m_comboInput->setFixedWidth(185);
-    m_comboInput->setFixedHeight(26);
-    m_comboInput->setStyleSheet(
+    // Shared combo-box chrome, reused for source, device, and output combos.
+    const QString comboStyle =
         "QComboBox { background:#131313; color:#ccc; border:1px solid #262626; border-radius:5px;"
         "padding:2px 8px; font-size:11px; }"
         "QComboBox:hover { border:1px solid #3a3a3a; }"
         "QComboBox::drop-down { border:none; width:18px; }"
         "QComboBox QAbstractItemView { background:#1a1a1a; color:#fff; border:1px solid #333;"
-        "selection-background-color:#333333; font-size:11px; outline:none; }");
-    inLay->addWidget(m_comboInput);
-    lay->addWidget(inGroup);
+        "selection-background-color:#333333; font-size:11px; outline:none; }";
+
+    // ── Audio Source (Microphone / Playback Device) ────────────────────────────
+    // This is the master routing choice: it decides WHAT gets processed.
+    // Nothing is captured until the user picks one — the mic is never opened
+    // implicitly.
+    auto* srcGroup = new QWidget();
+    srcGroup->setStyleSheet("background:transparent;");
+    auto* srcLay = new QVBoxLayout(srcGroup);
+    srcLay->setContentsMargins(0,0,0,0);
+    srcLay->setSpacing(1);
+
+    auto* srcLabel = new QLabel("Audio Source");
+    srcLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
+    srcLay->addWidget(srcLabel);
+
+    m_comboSource = new QComboBox();
+    m_comboSource->setFixedWidth(130);
+    m_comboSource->setFixedHeight(26);
+    m_comboSource->setStyleSheet(comboStyle);
+    m_comboSource->addItem("🎤 Microphone",      QVariant());
+    m_comboSource->setItemData(0, QString("microphone"), kRoleSourceMode);
+    m_comboSource->addItem("🔊 Playback Device", QVariant());
+    m_comboSource->setItemData(1, QString("playback"), kRoleSourceMode);
+    srcLay->addWidget(m_comboSource);
+    lay->addWidget(srcGroup);
+
+    // ── Device selector (swaps between Mic list and Playback list) ────────────
+    auto* devGroup = new QWidget();
+    devGroup->setStyleSheet("background:transparent;");
+    auto* devLay = new QVBoxLayout(devGroup);
+    devLay->setContentsMargins(0,0,0,0);
+    devLay->setSpacing(1);
+
+    m_deviceGroupLabel = new QLabel("Playback Device");
+    m_deviceGroupLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
+    devLay->addWidget(m_deviceGroupLabel);
+
+    m_deviceStack = new QStackedWidget();
+    m_deviceStack->setFixedWidth(190);
+    m_deviceStack->setFixedHeight(26);
+
+    m_comboMic = new QComboBox();
+    m_comboMic->setFixedHeight(26);
+    m_comboMic->setStyleSheet(comboStyle);
+    m_deviceStack->insertWidget(kStackPageMic, m_comboMic);
+
+    m_comboPlayback = new QComboBox();
+    m_comboPlayback->setFixedHeight(26);
+    m_comboPlayback->setStyleSheet(comboStyle);
+    m_deviceStack->insertWidget(kStackPagePlayback, m_comboPlayback);
+
+    devLay->addWidget(m_deviceStack);
+    lay->addWidget(devGroup);
 
     // ── Output Device ─────────────────────────────────────────────────────────
     auto* outGroup = new QWidget();
@@ -231,9 +272,9 @@ QWidget* MainWindow::buildTitleBar() {
     outLay->addWidget(outLabel);
 
     m_comboOutput = new QComboBox();
-    m_comboOutput->setFixedWidth(185);
+    m_comboOutput->setFixedWidth(150);
     m_comboOutput->setFixedHeight(26);
-    m_comboOutput->setStyleSheet(m_comboInput->styleSheet());
+    m_comboOutput->setStyleSheet(comboStyle);
     outLay->addWidget(m_comboOutput);
     lay->addWidget(outGroup);
 
@@ -278,11 +319,16 @@ QWidget* MainWindow::buildTitleBar() {
     lay->addWidget(btnClose);
 
     // ── Wire device-change signals ─────────────────────────────────────────────
-    // These were previously unconnected; now properly wired so changing the
-    // combo while running restarts capture with the new device immediately.
-    connect(m_comboInput,  QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::onInputDeviceChanged);
-    connect(m_comboOutput, QOverload<int>::of(&QComboBox::currentIndexChanged),
+    // Changing any of these while running restarts capture with the new
+    // routing immediately; changing them while stopped just remembers the
+    // choice for the next Start.
+    connect(m_comboSource,   QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onAudioSourceChanged);
+    connect(m_comboMic,      QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onMicDeviceChanged);
+    connect(m_comboPlayback, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onPlaybackDeviceChanged);
+    connect(m_comboOutput,   QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onOutputDeviceChanged);
 
     return m_titleBar;
@@ -317,46 +363,62 @@ QWidget* MainWindow::buildStatusBar() {
 // Device enumeration & dropdown population
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::populateDeviceDropdowns() {
-    // Block signals while we populate so we don't trigger onDeviceChanged
-    m_comboInput ->blockSignals(true);
-    m_comboOutput->blockSignals(true);
+    // Block signals while we populate so we don't trigger the change handlers
+    // (and, critically, so we never trip a spurious capture start).
+    m_comboSource  ->blockSignals(true);
+    m_comboMic     ->blockSignals(true);
+    m_comboPlayback->blockSignals(true);
+    m_comboOutput  ->blockSignals(true);
 
-    m_comboInput ->clear();
-    m_comboOutput->clear();
+    m_comboMic     ->clear();
+    m_comboPlayback->clear();
+    m_comboOutput  ->clear();
 
     const auto& s = globalSettings();
 
-    // ── Input: enumerate all WASAPI endpoints (render loopback + mics) ────────
+    // ── Enumerate all WASAPI endpoints (render loopback + capture mics) ───────
     m_inputSources = AudioCapture::enumerateInputSources();
 
-    // "Default" entries first
-    m_comboInput->addItem("🔊 Default Playback (Loopback)", QVariant());
-    m_comboInput->setItemData(0, QString(""), kRoleDeviceId);
-    m_comboInput->setItemData(0, QString("loopback"), kRoleDeviceType);
+    // "Default microphone" first, then every capture (recording) endpoint —
+    // i.e. "Any recording device" on the system.
+    m_comboMic->addItem("🎤 Default Microphone", QVariant());
+    m_comboMic->setItemData(0, QString(""), kRoleDeviceId);
+    int savedMicIdx = 0;
 
-    int savedInputIdx = 0; // will point to the "default" if nothing matches
+    // "Default playback device" first, then every render endpoint — Speakers,
+    // Headphones, VoiceMeeter Input/AUX, VB-Cable, or any other Windows
+    // playback device shows up here automatically since it comes straight
+    // from the OS's render-endpoint list.
+    m_comboPlayback->addItem("🔊 Default Playback Device", QVariant());
+    m_comboPlayback->setItemData(0, QString(""), kRoleDeviceId);
+    int savedPlaybackIdx = 0;
 
-    for (int i = 0; i < (int)m_inputSources.size(); ++i) {
-        const auto& d = m_inputSources[i];
-        QString prefix;
-        if (d.type == AudioDeviceType::Loopback)
-            prefix = "🔊 "; // playback / loopback
-        else
-            prefix = "🎤 "; // microphone
-        QString label = prefix + QString::fromStdString(d.name);
-        m_comboInput->addItem(label, QVariant());
+    for (const auto& d : m_inputSources) {
+        QString qid   = QString::fromStdString(d.id);
+        QString label = QString::fromStdString(d.name);
 
-        int comboIdx = i + 1; // +1 for the "Default" entry
-        QString qid  = QString::fromStdString(d.id);
-        QString qtype = (d.type == AudioDeviceType::Loopback) ? "loopback" : "microphone";
-        m_comboInput->setItemData(comboIdx, qid,   kRoleDeviceId);
-        m_comboInput->setItemData(comboIdx, qtype, kRoleDeviceType);
-
-        // Restore selection by saved device ID
-        if (!s.inputDeviceId.isEmpty() && qid == s.inputDeviceId)
-            savedInputIdx = comboIdx;
+        if (d.type == AudioDeviceType::Microphone) {
+            int idx = m_comboMic->count();
+            m_comboMic->addItem(label, QVariant());
+            m_comboMic->setItemData(idx, qid, kRoleDeviceId);
+            if (!s.micDeviceId.isEmpty() && qid == s.micDeviceId)
+                savedMicIdx = idx;
+        } else {
+            int idx = m_comboPlayback->count();
+            m_comboPlayback->addItem(label, QVariant());
+            m_comboPlayback->setItemData(idx, qid, kRoleDeviceId);
+            if (!s.playbackDeviceId.isEmpty() && qid == s.playbackDeviceId)
+                savedPlaybackIdx = idx;
+        }
     }
-    m_comboInput->setCurrentIndex(savedInputIdx);
+    m_comboMic     ->setCurrentIndex(savedMicIdx);
+    m_comboPlayback->setCurrentIndex(savedPlaybackIdx);
+
+    // ── Audio Source: restore last mode (defaults to "playback") ──────────────
+    bool wantMic = (s.audioSourceMode == "microphone");
+    m_comboSource->setCurrentIndex(wantMic ? 0 : 1);
+    m_deviceStack->setCurrentIndex(wantMic ? kStackPageMic : kStackPagePlayback);
+    m_deviceGroupLabel->setText(wantMic ? "Microphone Device" : "Playback Device");
 
     // ── Output: enumerate PortAudio render devices ─────────────────────────────
     m_outputDevices = AudioCapture::enumerateOutputDevices();
@@ -378,25 +440,47 @@ void MainWindow::populateDeviceDropdowns() {
     }
     m_comboOutput->setCurrentIndex(savedOutputIdx);
 
-    m_comboInput ->blockSignals(false);
-    m_comboOutput->blockSignals(false);
+    m_comboSource  ->blockSignals(false);
+    m_comboMic     ->blockSignals(false);
+    m_comboPlayback->blockSignals(false);
+    m_comboOutput  ->blockSignals(false);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers to read current combo selection
 // ──────────────────────────────────────────────────────────────────────────────
+bool MainWindow::sourceIsMicrophone() const {
+    return m_comboSource->currentData(kRoleSourceMode).toString() == "microphone";
+}
+
 std::string MainWindow::selectedInputId() const {
-    return m_comboInput->currentData(kRoleDeviceId).toString().toStdString();
+    return sourceIsMicrophone()
+               ? m_comboMic->currentData(kRoleDeviceId).toString().toStdString()
+               : m_comboPlayback->currentData(kRoleDeviceId).toString().toStdString();
 }
 
 AudioDeviceType MainWindow::selectedInputType() const {
-    QString t = m_comboInput->currentData(kRoleDeviceType).toString();
-    return (t == "microphone") ? AudioDeviceType::Microphone
-                               : AudioDeviceType::Loopback;
+    return sourceIsMicrophone() ? AudioDeviceType::Microphone
+                                : AudioDeviceType::Loopback;
 }
 
 std::string MainWindow::selectedOutputId() const {
     return m_comboOutput->currentData(kRoleDeviceId).toString().toStdString();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Persist the current Audio Source + device selections immediately, so a
+// restart (even without ever pressing Start) remembers what the user picked.
+// ──────────────────────────────────────────────────────────────────────────────
+void MainWindow::persistDeviceSelection() {
+    auto& s = globalSettings();
+    s.audioSourceMode  = sourceIsMicrophone() ? "microphone" : "playback";
+    s.micDeviceId      = QString::fromStdString(
+                              m_comboMic->currentData(kRoleDeviceId).toString().toStdString());
+    s.playbackDeviceId = QString::fromStdString(
+                              m_comboPlayback->currentData(kRoleDeviceId).toString().toStdString());
+    s.outputDeviceId   = QString::fromStdString(selectedOutputId());
+    s.save();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -413,11 +497,7 @@ void MainWindow::startCapture() {
     auto& s = globalSettings();
 
     // Persist current selection
-    s.inputDeviceId   = QString::fromStdString(selectedInputId());
-    s.inputDeviceType = (selectedInputType() == AudioDeviceType::Loopback)
-                            ? "loopback" : "microphone";
-    s.outputDeviceId  = QString::fromStdString(selectedOutputId());
-    s.save();
+    persistDeviceSelection();
 
     // Errors are delivered via the errorOccurred signal → onAudioError,
     // which shows a dialog and calls stopCapture().  We just reset the button
@@ -462,16 +542,40 @@ void MainWindow::stopCapture() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Device changed (combo box)
+// Device / source changed (combo boxes)
 // ──────────────────────────────────────────────────────────────────────────────
-void MainWindow::onInputDeviceChanged(int /*idx*/) {
+void MainWindow::onAudioSourceChanged(int /*idx*/) {
+    bool wantMic = sourceIsMicrophone();
+    m_deviceStack->setCurrentIndex(wantMic ? kStackPageMic : kStackPagePlayback);
+    m_deviceGroupLabel->setText(wantMic ? "Microphone Device" : "Playback Device");
+
+    persistDeviceSelection();
     if (m_running) {
         stopCapture();
         startCapture();
     }
 }
 
+void MainWindow::onMicDeviceChanged(int /*idx*/) {
+    persistDeviceSelection();
+    // Only affects the live stream if the mic is the active source.
+    if (m_running && sourceIsMicrophone()) {
+        stopCapture();
+        startCapture();
+    }
+}
+
+void MainWindow::onPlaybackDeviceChanged(int /*idx*/) {
+    persistDeviceSelection();
+    // Only affects the live stream if playback loopback is the active source.
+    if (m_running && !sourceIsMicrophone()) {
+        stopCapture();
+        startCapture();
+    }
+}
+
 void MainWindow::onOutputDeviceChanged(int /*idx*/) {
+    persistDeviceSelection();
     if (m_running) {
         stopCapture();
         startCapture();
@@ -485,7 +589,6 @@ void MainWindow::onSettingsChanged(const AppSettings& s) {
     globalSettings() = s;
     m_proc->applySettings(s);
     m_liveTab->refreshFromSettings(s);
-    m_fileTab->refreshFromSettings(s);
     m_advTab->refreshFromSettings(s);
     m_advAudioTab->refreshFromSettings(s);
 }
@@ -521,11 +624,6 @@ void MainWindow::mouseReleaseEvent(QMouseEvent*) {
 void MainWindow::closeEvent(QCloseEvent* e) {
     stopCapture();
     // Persist current device selection before closing
-    auto& s = globalSettings();
-    s.inputDeviceId   = QString::fromStdString(selectedInputId());
-    s.inputDeviceType = (selectedInputType() == AudioDeviceType::Loopback)
-                            ? "loopback" : "microphone";
-    s.outputDeviceId  = QString::fromStdString(selectedOutputId());
-    s.save();
+    persistDeviceSelection();
     e->accept();
 }

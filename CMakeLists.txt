@@ -82,7 +82,6 @@ set(SOURCES
     src/dsp/DynamicBass.cpp
     src/dsp/ClampProcessor.cpp
     src/ui/LiveTab.cpp
-    src/ui/FileTab.cpp
     src/ui/AdvancedTab.cpp
     src/ui/AdvancedAudioTab.cpp
     src/ui/CustomWidgets.cpp
@@ -108,7 +107,6 @@ set(HEADERS
     src/dsp/DynamicBass.h
     src/dsp/ClampProcessor.h
     src/ui/LiveTab.h
-    src/ui/FileTab.h
     src/ui/AdvancedTab.h
     src/ui/AdvancedAudioTab.h
     src/ui/CustomWidgets.h

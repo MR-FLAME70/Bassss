@@ -104,10 +104,11 @@ void AppSettings::load() {
     LOAD_B(reverbEngineOn, false);
     LOAD_B(bypass, false);
 
-    // ── Device IDs (stable string identifiers) ─────────────────────────────
-    LOAD_S(inputDeviceId,   "");
-    LOAD_S(inputDeviceType, "loopback");
-    LOAD_S(outputDeviceId,  "");
+    // ── Audio routing: source + device IDs (stable string identifiers) ─────
+    LOAD_S(audioSourceMode,  "playback");
+    LOAD_S(playbackDeviceId, "");
+    LOAD_S(micDeviceId,      "");
+    LOAD_S(outputDeviceId,   "");
     LOAD_I(sampleRate, 48000);
     LOAD_I(bufferSize, 256);
 
@@ -155,7 +156,7 @@ void AppSettings::save() const {
     SAVE(speakerLevelFL); SAVE(speakerLevelFR); SAVE(speakerLevelC);
     SAVE(speakerLevelSub); SAVE(speakerLevelRL); SAVE(speakerLevelRR);
     SAVE(reverbEngineOn); SAVE(bypass);
-    SAVE(inputDeviceId); SAVE(inputDeviceType); SAVE(outputDeviceId);
+    SAVE(audioSourceMode); SAVE(playbackDeviceId); SAVE(micDeviceId); SAVE(outputDeviceId);
     SAVE(sampleRate); SAVE(bufferSize);
 #undef SAVE
 }

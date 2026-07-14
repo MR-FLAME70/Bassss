@@ -24,7 +24,6 @@ WebView2, CEF, HTML) is used.
 | **Dynamic Bass** | Additive lowpass+compressor branch, dry always passes through |
 | **Speaker Config** | Headphones, Stereo, 2.1, 4.0, 4.1, 5.1, 7.1 virtual surround with per-channel levels |
 | **Soft Clamp** | tanh at ±0.8 threshold — exact port of `clamp-worklet.js` |
-| **File Export** | Open WAV → run DSP chain offline → save WAV (32-bit float) |
 | **Dark GUI** | 800×600 fixed frameless window matching popup.css exactly |
 
 ---
@@ -174,9 +173,8 @@ bass-nuker-qt/
 │   └── ui/
 │       ├── CustomWidgets.h/cpp    ToggleSwitch, DarkSlider, DarkKnob, VUMeter, …
 │       ├── LiveTab.h/cpp          Tab 1: Bass Boost + Reverb + Output/Record
-│       ├── FileTab.h/cpp          Tab 2: Offline file processing (WAV → WAV)
-│       ├── AdvancedTab.h/cpp      Tab 3: Acoustic Engine + Speaker Config + Adv Reverb
-│       └── AdvancedAudioTab.h/cpp Tab 4: EQ + Dyn Bass + Comp + Limiter + Width + Pitch
+│       ├── AdvancedTab.h/cpp      Tab 2: Acoustic Engine + Speaker Config + Adv Reverb
+│       └── AdvancedAudioTab.h/cpp Tab 3: EQ + Dyn Bass + Comp + Limiter + Width + Pitch
 └── resources/
     ├── resources.qrc
     └── icons/                     icon16/48/128.png + preview.gif

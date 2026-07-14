@@ -119,17 +119,31 @@ struct AppSettings {
     // ── A/B bypass ───────────────────────────────────────────────────────────
     bool bypass = false;
 
-    // ── Audio device selection ────────────────────────────────────────────────
+    // ── Audio routing: source + device selection ──────────────────────────────
     // Stored as stable string IDs rather than PortAudio indices (which change
     // between sessions as devices are added/removed).
     //
-    // inputDeviceId  — Windows device ID (IMMDevice::GetId) for the input
-    //                  source; empty = use system default.
-    // inputDeviceType — "loopback" or "microphone" — determines capture mode.
-    // outputDeviceId  — "<paIndex>:<name>" for the PortAudio output device;
-    //                   empty = system default.
-    QString inputDeviceId;
-    QString inputDeviceType = "loopback";   // "loopback" | "microphone"
+    // audioSourceMode  — "playback" or "microphone". Determines which of the
+    //                    two device IDs below is actually used for capture.
+    //                    Defaults to "playback" so the app NEVER starts
+    //                    listening on the microphone unless the user
+    //                    explicitly selects it.
+    // playbackDeviceId — Windows render-endpoint ID (IMMDevice::GetId) used
+    //                    for WASAPI loopback capture when audioSourceMode ==
+    //                    "playback"; empty = system default playback device.
+    // micDeviceId      — Windows capture-endpoint ID (IMMDevice::GetId) used
+    //                    for direct microphone capture when audioSourceMode
+    //                    == "microphone"; empty = system default microphone.
+    // outputDeviceId   — "<paIndex>:<name>" for the PortAudio render device
+    //                    the processed signal is played back to; empty =
+    //                    system default.
+    //
+    // Each of the three IDs is remembered independently, so switching the
+    // Audio Source back and forth restores whatever device was last picked
+    // for that source instead of forgetting it.
+    QString audioSourceMode = "playback";   // "playback" | "microphone"
+    QString playbackDeviceId;
+    QString micDeviceId;
     QString outputDeviceId;
 
     // Advisory sample rate / buffer — actual rate is set by the device.
