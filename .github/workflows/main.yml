@@ -29,19 +29,19 @@ jobs:
           $maxAttempts = 5
           for ($i = 1; $i -le $maxAttempts; $i++) {
             try {
-              Write-Host "Attempt $i/$maxAttempts: updating vcpkg repo..."
+              Write-Host "Attempt ${i}/${maxAttempts}: updating vcpkg repo..."
               git pull --quiet
 
-              Write-Host "Attempt $i/$maxAttempts: bootstrapping vcpkg..."
+              Write-Host "Attempt ${i}/${maxAttempts}: bootstrapping vcpkg..."
               .\bootstrap-vcpkg.bat -disableMetrics
               if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat exited with code $LASTEXITCODE" }
 
               Write-Host "vcpkg ready."
               break
             } catch {
-              Write-Warning "Attempt $i failed: $_"
+              Write-Warning "Attempt ${i} failed: $_"
               if ($i -eq $maxAttempts) {
-                throw "vcpkg bootstrap failed after $maxAttempts attempts"
+                throw "vcpkg bootstrap failed after ${maxAttempts} attempts"
               }
               Start-Sleep -Seconds (10 * $i)
             }
