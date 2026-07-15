@@ -200,9 +200,14 @@ private:
     static float readDelay(const std::vector<float>& buf, int writeIdx, int delay) {
         if (delay <= 0 || buf.empty()) return 0.f;
         int n   = (int)buf.size();
+        // delay is always < n by construction, so idx is at most one buffer
+        // length negative — a single conditional add is enough. The extra
+        // `% n` that used to follow the wrap loop was always a no-op (idx is
+        // already in [0, n) at that point) but still cost a division every
+        // call — this runs 4x per sample (pre-delay L/R, ER-delay L/R).
         int idx = writeIdx - delay;
-        while (idx < 0) idx += n;
-        return buf[idx % n];
+        if (idx < 0) idx += n;
+        return buf[idx];
     }
     static void writeDelay(std::vector<float>& buf, int& writeIdx, float v) {
         if (buf.empty()) return;

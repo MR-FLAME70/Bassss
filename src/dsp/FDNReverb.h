@@ -117,9 +117,14 @@ public:
             float delaySec  = std::max(0.001f, baseSec + modSec);
             float delaySamples = delaySec * (float)sampleRate;
 
-            // Fractional read (linear interpolation)
+            // Fractional read (linear interpolation).
+            // delaySamples is always well under bufLen by construction (see
+            // init()'s margin), so readPos is at most one buffer length
+            // negative — a plain conditional add replaces the per-sample
+            // std::fmod (called 8x/sample, once per FDN line) with a single
+            // comparison and branch.
             float readPos = (float)writeIdx[ln] - delaySamples;
-            float rp = std::fmod(readPos, (float)bufLen);
+            float rp = readPos;
             if (rp < 0.f) rp += bufLen;
             int i0 = (int)rp;
             float frac = rp - i0;

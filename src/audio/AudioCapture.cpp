@@ -3,6 +3,33 @@
 #include <cstring>
 #include <algorithm>
 
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+#include <xmmintrin.h>
+#include <pmmintrin.h>
+#define BASSNUKER_HAS_SSE_DENORMAL_CONTROL 1
+#endif
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Denormal (subnormal) float protection for the audio thread.
+//
+// IIR filters and feedback loops (biquads, the FDN reverb's damping/allpass
+// state, compressor/limiter envelopes) settle toward exact zero
+// asymptotically. Once their state drops into the denormal range
+// (~1e-38 and smaller), some x86 CPUs execute every subsequent float op on
+// that value 10-100x slower in microcode — inaudible on its own, but a
+// direct, well-documented cause of periodic CPU spikes/crackling that
+// appear specifically during quiet passages or silence (exactly when it's
+// least expected). Setting FTZ (flush-to-zero) + DAZ (denormals-are-zero)
+// once per audio thread eliminates the entire class of bug at the hardware
+// level instead of requiring every DSP module to add its own epsilon hacks.
+// ──────────────────────────────────────────────────────────────────────────────
+static void enableDenormalFlushToZero() {
+#ifdef BASSNUKER_HAS_SSE_DENORMAL_CONTROL
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+    _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#endif
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // AudioCapture — PortAudio initialisation + output stream management.
 //
@@ -240,6 +267,12 @@ int AudioCapture::outCallback(const void*, void* outputBuffer,
     auto* self = static_cast<AudioCapture*>(userData);
     auto* out  = static_cast<float*>(outputBuffer);
 
+    // PortAudio invokes this callback on the same dedicated audio thread for
+    // the life of the stream, so a function-local static is exactly once
+    // per thread, with no extra per-block cost afterward.
+    static thread_local bool denormalGuardEnabled = (enableDenormalFlushToZero(), true);
+    (void)denormalGuardEnabled;
+
     // Actively pin queued latency before draining this block. Cheap (O(1)):
     // only ever does work when backlog has actually built up (startup gap or
     // clock drift between the WASAPI capture clock and this device's output
@@ -270,6 +303,9 @@ int AudioCapture::paCallback(const void* inputBuffer, void* outputBuffer,
     auto* self = static_cast<AudioCapture*>(userData);
     auto* in   = static_cast<const float*>(inputBuffer);
     auto* out  = static_cast<float*>(outputBuffer);
+
+    static thread_local bool denormalGuardEnabled = (enableDenormalFlushToZero(), true);
+    (void)denormalGuardEnabled;
 
     if (!in) {
         std::memset(out, 0, frameCount * 2 * sizeof(float));

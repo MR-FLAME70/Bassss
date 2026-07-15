@@ -4,6 +4,10 @@
 #include <numeric>
 #include <cstring>
 #include <fstream>
+#include <chrono>
+#include <QFile>
+#include <QDir>
+#include <QDateTime>
 
 // ──────────────────────────────────────────────────────────────────────────────
 // AudioProcessor implementation — matches offscreen.js signal chain
@@ -12,8 +16,13 @@
 AudioProcessor::AudioProcessor() {
     meterBufL.resize(METER_BUF, 0.f);
     meterBufR.resize(METER_BUF, 0.f);
-    spectrumBins.resize(FFT_SIZE/2, 0.f);
-    fftBuf.resize(FFT_SIZE, 0.f);
+
+    // Precompute the Hann window once. The old code recomputed
+    // 0.5-0.5*cos(2*pi*n/N) inside the innermost (k,n) loop of the spectrum
+    // DFT — i.e. FFT_SIZE/2 times more often than necessary, all for a
+    // value that never changes.
+    for (int n = 0; n < FFT_SIZE; ++n)
+        hannWindow_[n] = 0.5f - 0.5f * std::cos(2.f * (float)M_PI * n / FFT_SIZE);
 
     // Set up limiter defaults (ratio=20, attack=0.001s, knee=0)
     limiter.setRatio(20.f);
@@ -29,6 +38,14 @@ AudioProcessor::AudioProcessor() {
     resonanceFilter.setType(BiquadFilter::Peaking, 44100.0, 1000.0, 1.0, 0.0);
 }
 
+AudioProcessor::~AudioProcessor() {
+    if (recordThreadRunning_.load()) {
+        recordThreadRunning_.store(false);
+        if (recordThread_.joinable()) recordThread_.join();
+    }
+    if (recordFile_.is_open()) recordFile_.close();
+}
+
 void AudioProcessor::setSampleRate(double sr) {
     sampleRate = sr;
     bassFilter.setSampleRate(sr);
@@ -42,12 +59,28 @@ void AudioProcessor::setSampleRate(double sr) {
     limiter.setSampleRate(sr);
     pitchShifter.setSampleRate(sr);
     speakerConfig.setSampleRate(sr);
+
+    // (Re)initialize gain smoothers for the new rate. ~8ms is short enough
+    // to feel instant on a slider drag but long enough (several hundred
+    // samples) to eliminate the audible step on toggle/mix changes.
+    volumeSm_.init(sr, 8.f, volumeGain.load());
+    drySm_.init(sr, 8.f, dryGain.load());
+    wetSm_.init(sr, 8.f, wetGain.load());
+    procGainSm_.init(sr, 8.f, processedMasterGain_.load());
+    bypassGainSm_.init(sr, 8.f, bypass.load() ? 1.f : 0.f);
+    smoothersInited_ = true;
 }
 
 void AudioProcessor::applySettings(const AppSettings& s) {
+    // Lock-free hand-off to the audio thread: write into whichever of the
+    // two buffers isn't the currently-published one, then publish its index
+    // with a single atomic store. std::mutex here only serializes concurrent
+    // UI-thread callers against each other (settings can be posted from
+    // more than one Qt signal handler) — the audio thread never takes it.
     std::lock_guard<std::mutex> lk(settingsMutex);
-    pendingSettings = s;
-    pendingDirty.store(true);
+    settingsWriteSlot_ = 1 - settingsWriteSlot_;
+    settingsBuf_[settingsWriteSlot_] = s;
+    settingsReadyIndex_.store(settingsWriteSlot_, std::memory_order_release);
 }
 
 void AudioProcessor::applySettingsInternal(const AppSettings& s) {
@@ -206,14 +239,14 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
 }
 
 void AudioProcessor::consumePendingSettings() {
-    if (!pendingDirty.load()) return;
-    AppSettings snap;
-    {
-        std::lock_guard<std::mutex> lk(settingsMutex);
-        snap = pendingSettings;
-        pendingDirty.store(false);
-    }
-    applySettingsInternal(snap);
+    // Single atomic exchange, no lock, no allocation: grab whichever slot is
+    // currently published (if any) and mark "nothing pending". Reading
+    // settingsBuf_[idx] here is safe because the UI thread only ever writes
+    // to the *other* slot on its next update, never the one it just
+    // published — see applySettings().
+    int idx = settingsReadyIndex_.exchange(-1, std::memory_order_acquire);
+    if (idx < 0) return;
+    applySettingsInternal(settingsBuf_[idx]);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -227,16 +260,30 @@ void AudioProcessor::processStereo(float& l, float& r) {
         return; // pass-through when disabled
     }
 
+    if (!smoothersInited_) setSampleRate(sampleRate); // safety net if never called
+
     float inL = l, inR = r;
+
+    // ── Smoothed control-rate gains ───────────────────────────────────────────
+    // Targets were set (as plain atomics) in applySettingsInternal(); each
+    // gets ramped one small step per sample instead of jumping instantly, so
+    // a volume-slider drag, a bypass toggle, or a reverb mix change fades in
+    // over ~8ms instead of producing a single-sample discontinuity (click).
+    volumeSm_.setTarget(volumeGain.load());
+    drySm_.setTarget(dryGain.load());
+    wetSm_.setTarget(wetGain.load());
+    procGainSm_.setTarget(processedMasterGain_.load());
+    bypassGainSm_.setTarget(bypass.load() ? 1.f : 0.f);
 
     // ── Bass low-shelf + volume ───────────────────────────────────────────────
     bassFilter.processStereo(l, r);
-    float vol = volumeGain.load();
+    float vol = volumeSm_.next();
     l *= vol; r *= vol;
 
     // ── Dry / Wet split ───────────────────────────────────────────────────────
-    float dl = l * dryGain.load();
-    float dr = r * dryGain.load();
+    float dry = drySm_.next();
+    float dl = l * dry;
+    float dr = r * dry;
 
     float wl = l, wr = r; // wet path
     if (reverbOn.load()) {
@@ -246,9 +293,13 @@ void AudioProcessor::processStereo(float& l, float& r) {
         // Resonance filter on wet
         resonanceFilter.processStereo(revOutL, revOutR);
 
-        wl = revOutL * wetGain.load();
-        wr = revOutR * wetGain.load();
+        float wet = wetSm_.next();
+        wl = revOutL * wet;
+        wr = revOutR * wet;
     } else {
+        // Still advance the smoother toward 0 so re-enabling reverb doesn't
+        // resume from a stale target and jump.
+        wetSm_.next();
         wl = 0.f; wr = 0.f;
     }
 
@@ -260,8 +311,8 @@ void AudioProcessor::processStereo(float& l, float& r) {
     float sumR = dr + wr + sr2 * sGain;
 
     // ── A/B bypass ────────────────────────────────────────────────────────────
-    float procGain   = processedMasterGain_.load();
-    float bypassGain = bypass.load() ? 1.f : 0.f;
+    float procGain   = procGainSm_.next();
+    float bypassGain = bypassGainSm_.next();
     float outL = sumL * procGain + inL * bypassGain;
     float outR = sumR * procGain + inR * bypassGain;
 
@@ -294,13 +345,11 @@ void AudioProcessor::processStereo(float& l, float& r) {
     l = outL;
     r = outR;
 
-    // ── Recording buffer ──────────────────────────────────────────────────────
-    if (recording) {
-        std::lock_guard<std::mutex> lk(recordMutex);
-        if (recording) {
-            recordBuf.push_back(outL);
-            recordBuf.push_back(outR);
-        }
+    // ── Recording ──────────────────────────────────────────────────────────────
+    // Lock-free push into the ring; the writer thread drains and streams to
+    // disk. No lock, no allocation, no growing buffer on the audio thread.
+    if (recording.load(std::memory_order_relaxed)) {
+        recordRing_.push(outL, outR);
     }
 }
 
@@ -327,79 +376,158 @@ AudioProcessor::MeterData AudioProcessor::getMeterData() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Spectrum (very simple FFT-free power-spectrum via squared-magnitude buckets)
-// A proper FFT (e.g., pffft) would be wired in here for the full visualiser.
+// Spectrum
+//
+// Audio thread (here): O(1) per sample — just write into the current raw
+// sample block. Once a block fills, hand it to the UI thread via a
+// lock-free double buffer and move on; no trig, no allocation, no lock.
+//
+// UI thread (computeSpectrumFromBlock, called from getSpectrum): does the
+// actual O(N^2) DFT. This is still a simple squared-magnitude DFT rather
+// than a real FFT (a proper FFT, e.g. pffft, would cut this from O(N^2) to
+// O(N log N) and is worth wiring in if the UI thread's spectrum-tick timer
+// ever becomes a bottleneck) — but critically it no longer runs on the
+// real-time audio thread, so it can no longer cause a dropout.
 // ──────────────────────────────────────────────────────────────────────────────
 void AudioProcessor::updateSpectrum(float l, float r) {
-    float mono = 0.5f*(l+r);
-    fftBuf[fftPos] = mono;
-    fftPos = (fftPos + 1) % FFT_SIZE;
+    fftBuf_[fftWriteSlot_][fftPos_] = 0.5f * (l + r);
+    if (++fftPos_ < FFT_SIZE) return;
+    fftPos_ = 0;
 
-    // Compute magnitude spectrum every FFT_SIZE samples
-    static int countdown = FFT_SIZE;
-    if (--countdown > 0) return;
-    countdown = FFT_SIZE;
+    // Publish the just-filled block and switch to the other one. If the UI
+    // thread hasn't consumed the previous block yet, this simply overwrites
+    // the "ready" index — spectrum display only needs the latest block, so
+    // dropping a stale one is correct behavior, not a bug.
+    fftReadyIndex_.store(fftWriteSlot_, std::memory_order_release);
+    fftWriteSlot_ = 1 - fftWriteSlot_;
+}
 
-    std::vector<float> bins(FFT_SIZE/2, 0.f);
+void AudioProcessor::computeSpectrumFromBlock(const std::array<float, FFT_SIZE>& block,
+                                              std::vector<float>& outBins) const {
+    outBins.assign(FFT_SIZE/2, 0.f);
+    const float twoPiOverN = 2.f * (float)M_PI / FFT_SIZE;
     for (int k = 0; k < FFT_SIZE/2; ++k) {
+        // Goertzel-style recurrence: rotate a running unit complex number by
+        // a fixed per-sample angle instead of calling cos()/sin() for every
+        // (k, n) pair. This replaces 2*FFT_SIZE transcendental calls per bin
+        // with 2 (to seed the rotator) plus one complex multiply per sample.
+        float angle = twoPiOverN * k;
+        float cosA = std::cos(angle), sinA = std::sin(angle);
+        float cr = 1.f, ci = 0.f; // running e^{-i*angle*n}
         double re = 0.0, im = 0.0;
         for (int n = 0; n < FFT_SIZE; ++n) {
-            int idx = (fftPos + n) % FFT_SIZE;
-            double w = 0.5 - 0.5*std::cos(2.0*M_PI*n/FFT_SIZE); // Hann
-            re += fftBuf[idx] * w * std::cos(2.0*M_PI*k*n/FFT_SIZE);
-            im -= fftBuf[idx] * w * std::sin(2.0*M_PI*k*n/FFT_SIZE);
+            float w = hannWindow_[n] * block[n];
+            re += w * cr;
+            im -= w * ci;
+            // Rotate (cr, ci) by -angle for the next n.
+            float ncr = cr * cosA + ci * sinA;
+            float nci = ci * cosA - cr * sinA;
+            cr = ncr; ci = nci;
         }
-        bins[k] = (float)std::sqrt(re*re+im*im);
+        outBins[k] = (float)std::sqrt(re*re + im*im);
     }
-
-    std::lock_guard<std::mutex> lk(spectrumMutex);
-    spectrumBins = bins;
-    newSpectrumData = true;
 }
 
 bool AudioProcessor::getSpectrum(std::vector<float>& bins) {
-    std::lock_guard<std::mutex> lk(spectrumMutex);
-    if (!newSpectrumData) return false;
-    bins = spectrumBins;
-    newSpectrumData = false;
+    int idx = fftReadyIndex_.exchange(-1, std::memory_order_acquire);
+    if (idx < 0) return false;
+    computeSpectrumFromBlock(fftBuf_[idx], bins);
     return true;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Recording (WAV export)
+//
+// Streams directly to a temp file via a dedicated writer thread fed by a
+// lock-free ring buffer, instead of accumulating the entire recording in a
+// std::vector held behind a mutex the audio thread locked on every sample.
+// That old design meant: an unbounded in-memory buffer (memory usage grew
+// for the whole session — hours of recording could mean gigabytes of RAM),
+// a mutex lock/unlock pair on every single output sample (~44100/s), and a
+// vector reallocation stall whenever capacity ran out — any one of which
+// could be enough to miss the audio callback's deadline and produce a
+// click/dropout. The ring buffer here has a fixed, small footprint
+// (~340ms of audio) regardless of how long the recording runs.
 // ──────────────────────────────────────────────────────────────────────────────
 void AudioProcessor::startRecording() {
-    std::lock_guard<std::mutex> lk(recordMutex);
-    recordBuf.clear();
-    recording = true;
+    // Defensive: make sure a previous session's writer thread is fully
+    // stopped before reusing the ring/file. Normal usage always calls
+    // stopRecording() first, so this is just a safety net.
+    if (recordThreadRunning_.load()) {
+        recordThreadRunning_.store(false);
+        if (recordThread_.joinable()) recordThread_.join();
+    }
+    recordRing_.reset();
+    recordedFrames_.store(0);
+
+    recordPath_ = QDir::tempPath() + QString("/bass_nuker_rec_%1.wav")
+                      .arg(QDateTime::currentMSecsSinceEpoch());
+    if (recordFile_.is_open()) recordFile_.close();
+    recordFile_.open(recordPath_.toStdString(), std::ios::binary);
+    if (!recordFile_.is_open()) return; // caller sees a failed stopRecording()
+    writeWavHeaderPlaceholder(recordFile_);
+
+    recordThreadRunning_.store(true);
+    recordThread_ = std::thread(&AudioProcessor::recordThreadLoop, this);
+    recording.store(true);
 }
 
 bool AudioProcessor::stopRecording(const QString& outPath) {
-    std::vector<float> data;
-    {
-        std::lock_guard<std::mutex> lk(recordMutex);
-        recording = false;
-        data = std::move(recordBuf);
-        recordBuf.clear();
+    recording.store(false);           // audio thread stops enqueueing frames
+    recordThreadRunning_.store(false);
+    if (recordThread_.joinable()) recordThread_.join(); // drains remaining frames
+
+    uint64_t frames = recordedFrames_.load();
+    if (recordFile_.is_open()) {
+        patchWavHeader(recordFile_, frames);
+        recordFile_.close();
     }
-    if (data.empty()) return false;
 
-    // Write 32-bit float WAV
-    std::ofstream f(outPath.toStdString(), std::ios::binary);
-    if (!f) return false;
+    if (frames == 0 || outPath.isEmpty()) {
+        QFile::remove(recordPath_);
+        return false;
+    }
 
-    int channels   = 2;
-    int sr         = (int)sampleRate;
-    int bitsPerSample = 32;
+    QFile::remove(outPath); // QFile::rename() fails if the destination exists
+    bool ok = QFile::rename(recordPath_, outPath);
+    if (!ok) {
+        // Temp dir and destination can be on different volumes; fall back
+        // to copy+remove if a plain rename isn't possible.
+        ok = QFile::copy(recordPath_, outPath);
+        QFile::remove(recordPath_);
+    }
+    return ok;
+}
+
+// Runs on a dedicated low-priority thread for the duration of the recording.
+// Drains the lock-free ring and appends each frame to the (already-open)
+// WAV file. Sleeps briefly when idle instead of busy-spinning.
+void AudioProcessor::recordThreadLoop() {
+    float l, r;
+    auto drainOnce = [&]() -> bool {
+        bool any = false;
+        while (recordFile_.is_open() && recordRing_.pop(l, r)) {
+            float frame[2] = { l, r };
+            recordFile_.write(reinterpret_cast<const char*>(frame), sizeof(frame));
+            recordedFrames_.fetch_add(1, std::memory_order_relaxed);
+            any = true;
+        }
+        return any;
+    };
+    while (recordThreadRunning_.load(std::memory_order_relaxed)) {
+        if (!drainOnce()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    drainOnce(); // final flush of anything pushed just before stop
+}
+
+void AudioProcessor::writeWavHeaderPlaceholder(std::ofstream& f) {
+    int channels = 2, bitsPerSample = 32;
+    int sr = (int)sampleRate;
     int blockAlign = channels * bitsPerSample / 8;
     int byteRate   = sr * blockAlign;
-    int dataSize   = (int)data.size() * sizeof(float);
-    int chunkSize  = 36 + dataSize;
-
     auto write4 = [&](uint32_t v){ f.write(reinterpret_cast<const char*>(&v),4); };
     auto write2 = [&](uint16_t v){ f.write(reinterpret_cast<const char*>(&v),2); };
-
-    f.write("RIFF", 4); write4(chunkSize);
+    f.write("RIFF", 4); write4(0); // chunkSize — patched in patchWavHeader()
     f.write("WAVE", 4);
     f.write("fmt ", 4); write4(18); // subchunk1Size = 18 for IEEE float
     write2(3);           // AudioFormat = IEEE_FLOAT (3)
@@ -409,8 +537,14 @@ bool AudioProcessor::stopRecording(const QString& outPath) {
     write2(blockAlign);
     write2(bitsPerSample);
     write2(0);           // cbSize = 0 (no extension)
-    f.write("data", 4); write4(dataSize);
-    f.write(reinterpret_cast<const char*>(data.data()), dataSize);
+    f.write("data", 4); write4(0); // dataSize — patched in patchWavHeader()
+}
 
-    return f.good();
+void AudioProcessor::patchWavHeader(std::ofstream& f, uint64_t frames) {
+    uint32_t dataSize  = (uint32_t)(frames * 2 * sizeof(float));
+    uint32_t chunkSize = 36 + dataSize;
+    f.seekp(4, std::ios::beg);
+    f.write(reinterpret_cast<const char*>(&chunkSize), 4);
+    f.seekp(40, std::ios::beg);
+    f.write(reinterpret_cast<const char*>(&dataSize), 4);
 }

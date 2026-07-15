@@ -86,6 +86,7 @@ set(SOURCES
     src/ui/AdvancedAudioTab.cpp
     src/ui/CustomWidgets.cpp
     src/ui/PillTabBar.cpp
+    src/ui/SplashScreen.cpp
     resources/resources.qrc
 )
 
@@ -95,6 +96,7 @@ set(HEADERS
     src/audio/AudioCapture.h
     src/audio/AudioProcessor.h
     src/audio/WASAPICapture.h
+    src/audio/RingBuffer.h
     src/dsp/BiquadFilter.h
     src/dsp/FDNReverb.h
     src/dsp/ReverbEngine.h
@@ -112,6 +114,7 @@ set(HEADERS
     src/ui/AdvancedAudioTab.h
     src/ui/CustomWidgets.h
     src/ui/PillTabBar.h
+    src/ui/SplashScreen.h
 )
 
 if(WIN32)

@@ -19,6 +19,10 @@
 #include <QPropertyAnimation>
 #include <QParallelAnimationGroup>
 #include <QPixmap>
+#include <QScreen>
+#include <QGuiApplication>
+#include <QCursor>
+#include <QEasingCurve>
 
 // ── Data roles for device combo boxes ─────────────────────────────────────────
 // UserRole+0 = device ID string (QString)
@@ -34,7 +38,7 @@ static const int kStackPagePlayback = 1;
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     globalSettings().load();
 
-    setFixedSize(860, 600);
+    setFixedSize(kWindowWidth, kWindowHeight);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
     // Frameless windows are square by default; a translucent surface lets us
     // paint our own anti-aliased rounded-rect background in paintEvent() and
@@ -59,6 +63,79 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 MainWindow::~MainWindow() {
     stopCapture();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Startup reveal: fade-in + scale-up from 97% → 100%, synced with the splash
+// screen's fade-out (see main.cpp).
+//
+// windowOpacity is a native, compositor-level alpha (DWM on Windows) rather
+// than a QGraphicsOpacityEffect layered over the widget tree — cheaper, and
+// GPU-composited the same way any other translucent top-level window is.
+//
+// The "scale" is a geometry animation (grow the window rect around its
+// center) rather than a true affine transform of rendered content: this is
+// a real, fixed-size, pixel-laid-out window (custom title bar, meters, pill
+// tabs), so genuinely scaling its live content would mean rendering into an
+// offscreen texture — overkill for a ~3% size delta over ~320ms. setFixedSize()
+// is relaxed for the duration of the animation and restored to the exact
+// original size the moment it finishes.
+// ──────────────────────────────────────────────────────────────────────────────
+void MainWindow::playIntroAnimation() {
+    // The window has never been shown yet, so geometry() doesn't reflect a
+    // real on-screen position — center it explicitly on whichever screen has
+    // the cursor (same rule the splash screen uses), so the reveal lands
+    // exactly where the splash was, instead of wherever the platform's
+    // default placement for a new frameless top-level happens to be.
+    QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
+    if (!screen) screen = QGuiApplication::primaryScreen();
+    QRect finalGeo(0, 0, kWindowWidth, kWindowHeight);
+    if (screen) {
+        const QRect avail = screen->availableGeometry();
+        finalGeo.moveCenter(avail.center());
+    }
+
+    // Compute a slightly smaller rect, same center, as the animation start.
+    const qreal kStartScale = 0.97;
+    const int startW = qRound(finalGeo.width()  * kStartScale);
+    const int startH = qRound(finalGeo.height() * kStartScale);
+    const QRect startGeo(finalGeo.center().x() - startW / 2,
+                          finalGeo.center().y() - startH / 2,
+                          startW, startH);
+
+    // Relax the fixed-size constraint so QPropertyAnimation can actually
+    // resize the window mid-animation; restored at the end.
+    setMinimumSize(0, 0);
+    setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+
+    setWindowOpacity(0.0);
+    setGeometry(startGeo);
+    show();
+    raise();
+    activateWindow();
+
+    auto* fade = new QPropertyAnimation(this, "windowOpacity", this);
+    fade->setStartValue(0.0);
+    fade->setEndValue(1.0);
+    fade->setDuration(320);
+    fade->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto* scale = new QPropertyAnimation(this, "geometry", this);
+    scale->setStartValue(startGeo);
+    scale->setEndValue(finalGeo);
+    scale->setDuration(320);
+    scale->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto* group = new QParallelAnimationGroup(this);
+    group->addAnimation(fade);
+    group->addAnimation(scale);
+
+    connect(group, &QParallelAnimationGroup::finished, this, [this]() {
+        // Lock back to the exact fixed size once the reveal is done.
+        setFixedSize(kWindowWidth, kWindowHeight);
+    });
+
+    group->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

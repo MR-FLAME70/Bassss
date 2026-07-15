@@ -44,6 +44,13 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
+    // Reveals the window with a fade-in + slight scale-up (97% → 100%),
+    // synced with the splash screen's fade-out. Call this instead of show()
+    // for the initial app launch. The window is fully constructed and laid
+    // out before this runs, so there is nothing left to "pop in" — only the
+    // opacity/size transition is animated.
+    void playIntroAnimation();
+
 protected:
     void closeEvent(QCloseEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
@@ -79,6 +86,13 @@ private:
     // title/status bar chrome so their rounded corners align exactly and
     // read as one continuous anti-aliased edge instead of a boxy frame.
     static constexpr int kCornerRadius = 12;
+
+    // Fixed window size (see setFixedSize() in the constructor). Kept as
+    // named constants so playIntroAnimation() can temporarily relax the
+    // size constraints for the scale-up animation and then restore exactly
+    // this size afterward.
+    static constexpr int kWindowWidth  = 860;
+    static constexpr int kWindowHeight = 600;
 
     // Tab-switch crossfade: a static snapshot of the outgoing page fades out
     // on top while the incoming page (already switched in underneath) fades
