@@ -22,12 +22,12 @@ struct AppSettings {
 
     // ── Reverb top-level ──────────────────────────────────────────────────────
     bool  reverbOn      = false;
-    QString reverbPreset = "hauntedcavernv2";
+    QString reverbPreset = "hauntedcavernv3";
     float reverbAmount  = 100.f;   // % (Effects Amount)
-    float reverbDecay   = 9.0f;    // seconds (hauntedcavernv2 default)
-    float reverbMix     = 74.f;    // % wet
-    float reverbPredelay = 38.f;   // ms
-    float reverbDiffuse = 78.f;    // %
+    float reverbDecay   = 5.5f;    // seconds (hauntedcavernv3 default)
+    float reverbMix     = 15.f;    // % wet
+    float reverbPredelay = 28.f;   // ms
+    float reverbDiffuse = 90.f;    // %
     float reverbToneHz  = 3600.f;  // High Cut Hz — single tone/high-cut control,
                                     // shared by the Basic "Tone" slider and the
                                     // Advanced "High Cut" slider (same field in
@@ -38,17 +38,19 @@ struct AppSettings {
     float songVolume    = 100.f;   // % dry song level
 
     // ── Advanced reverb engine ────────────────────────────────────────────────
-    float reverbRoomSize            = 2.6f;
+    // Defaults match the hauntedcavernv3 preset exactly so the first-run
+    // sound is identical to the Chrome extension's Haunted Cavern v3 sound.
+    float reverbRoomSize            = 2.7f;
     float reverbEarlyReflectionDelay  = 0.f;    // ms
-    float reverbEarlyReflectionLevel  = 38.f;   // %
-    float reverbLateReverbLevel       = 100.f;  // %
-    float reverbHfDamping             = 35.f;   // %
-    float reverbLfDamping             = 15.f;   // %
-    float reverbStereoWidth           = 165.f;  // % (0-200)
-    float reverbModulationDepth       = 55.f;   // %
-    float reverbModulationRate        = 30.f;   // %
-    float reverbLowCut                = 90.f;   // Hz
-    float reverbDensity               = 78.f;   // % (hauntedcavernv2 falls back to its own diffuse=78)
+    float reverbEarlyReflectionLevel  = 280.f;  // %
+    float reverbLateReverbLevel       = 667.f;  // %
+    float reverbHfDamping             = 30.f;   // %
+    float reverbLfDamping             = 12.f;   // %
+    float reverbStereoWidth           = 150.f;  // % (0-200)
+    float reverbModulationDepth       = 50.f;   // %
+    float reverbModulationRate        = 25.f;   // %
+    float reverbLowCut                = 85.f;   // Hz
+    float reverbDensity               = 90.f;   // % (hauntedcavernv3)
     float reverbWetLevel              = 100.f;  // %
     float reverbDryLevel              = 0.f;    // %
 
@@ -114,7 +116,9 @@ struct AppSettings {
     float speakerLevelRR       = 100.f; // %
 
     // ── Advanced Reverb Engine on/off ─────────────────────────────────────────
-    bool reverbEngineOn = false;
+    // Default true so the hauntedcavernv3 preset values above actually reach
+    // the DSP on first run (matches Chrome extension behaviour).
+    bool reverbEngineOn = true;
 
     // ── Echo Engine ────────────────────────────────────────────────────────────
     // Real-time feedback delay line (see dsp/EchoEngine.h). `echoOn` is the

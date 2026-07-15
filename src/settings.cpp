@@ -23,27 +23,27 @@ void AppSettings::load() {
     LOAD_F(speed, 1.f);
 
     LOAD_B(reverbOn, false);
-    LOAD_S(reverbPreset, "hauntedcavernv2");
+    LOAD_S(reverbPreset, "hauntedcavernv3");
     LOAD_F(reverbAmount, 100.f);
-    LOAD_F(reverbDecay, 9.0f);
-    LOAD_F(reverbMix, 74.f);
-    LOAD_F(reverbPredelay, 38.f);
-    LOAD_F(reverbDiffuse, 78.f);
+    LOAD_F(reverbDecay, 5.5f);
+    LOAD_F(reverbMix, 15.f);
+    LOAD_F(reverbPredelay, 28.f);
+    LOAD_F(reverbDiffuse, 90.f);
     LOAD_F(reverbToneHz, 3600.f);
     LOAD_F(reverbResonanceHz, 1000.f);
     LOAD_F(reverbResonanceQ, 0.f);
     LOAD_F(songVolume, 100.f);
-    LOAD_F(reverbRoomSize, 2.6f);
+    LOAD_F(reverbRoomSize, 2.7f);
     LOAD_F(reverbEarlyReflectionDelay, 0.f);
-    LOAD_F(reverbEarlyReflectionLevel, 38.f);
-    LOAD_F(reverbLateReverbLevel, 100.f);
-    LOAD_F(reverbHfDamping, 35.f);
-    LOAD_F(reverbLfDamping, 15.f);
-    LOAD_F(reverbStereoWidth, 165.f);
-    LOAD_F(reverbModulationDepth, 55.f);
-    LOAD_F(reverbModulationRate, 30.f);
-    LOAD_F(reverbLowCut, 90.f);
-    LOAD_F(reverbDensity, 78.f);
+    LOAD_F(reverbEarlyReflectionLevel, 280.f);
+    LOAD_F(reverbLateReverbLevel, 667.f);
+    LOAD_F(reverbHfDamping, 30.f);
+    LOAD_F(reverbLfDamping, 12.f);
+    LOAD_F(reverbStereoWidth, 150.f);
+    LOAD_F(reverbModulationDepth, 50.f);
+    LOAD_F(reverbModulationRate, 25.f);
+    LOAD_F(reverbLowCut, 85.f);
+    LOAD_F(reverbDensity, 90.f);
     LOAD_F(reverbWetLevel, 100.f);
     LOAD_F(reverbDryLevel, 0.f);
 
@@ -101,7 +101,7 @@ void AppSettings::load() {
     LOAD_F(speakerLevelRL, 100.f);
     LOAD_F(speakerLevelRR, 100.f);
 
-    LOAD_B(reverbEngineOn, false);
+    LOAD_B(reverbEngineOn, true);
     LOAD_B(bypass, false);
 
     LOAD_B(echoOn, false);
