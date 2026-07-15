@@ -123,47 +123,53 @@ void AdvancedTab::buildUI() {
         cl->setSpacing(10);
 
         cl->addWidget(makeLabel("Envelope", 11, false, "#aaa"));
-        makeRow(0.1f, 250.f, 0.01f, sliderDecay,    lblDecayVal);
-        makeRow(0,    1500,  1,     sliderPredelay, lblPredelayVal);
-        makeRow(0,    900,   1,     sliderDiffuse,  lblDiffuseVal);
+        makeRow(0.1,   25.0,  0.1,  sliderDecay,    lblDecayVal);
+        makeRow(0,     2000,  1,    sliderPredelay, lblPredelayVal);
+        makeRow(0,     100,   1,    sliderDiffuse,  lblDiffuseVal);
         addRow(cl, "Decay (s)",      sliderDecay,    lblDecayVal);
         addRow(cl, "Pre-delay (ms)", sliderPredelay, lblPredelayVal);
         addRow(cl, "Diffusion (%)",  sliderDiffuse,  lblDiffuseVal);
 
         cl->addWidget(makeLabel("Room Character", 11, false, "#aaa"));
-        makeRow(0.25, 30,   0.05, slRoomSize, lblRoomSize);
-        makeRow(0,    1000, 1,    slDensity,  lblDensity);
-        makeRow(0,    1000, 1,    slModDepth, lblModDepth);
-        makeRow(0,    1000, 1,    slModRate,  lblModRate);
+        makeRow(0.25, 3.0,  0.05, slRoomSize, lblRoomSize);
+        makeRow(0,    100,  1,    slDensity,  lblDensity);
+        makeRow(0,    100,  1,    slModDepth, lblModDepth);
+        makeRow(0,    100,  1,    slModRate,  lblModRate);
         addRow(cl, "Room Size",   slRoomSize, lblRoomSize);
         addRow(cl, "Density %",   slDensity,  lblDensity);
         addRow(cl, "Mod Depth %", slModDepth, lblModDepth);
         addRow(cl, "Mod Rate %",  slModRate,  lblModRate);
 
         cl->addWidget(makeLabel("Early Reflections", 11, false, "#aaa"));
-        makeRow(0, 2000, 1, slERDelay, lblERDelay);
-        makeRow(0, 1000, 1, slERLevel, lblERLevel);
+        makeRow(0,   500, 1, slERDelay, lblERDelay);
+        // Upper bound 300 to accommodate hauntedcavernv3's 280% ER gain
+        // compensation (×6.67 for its 15% outer mix) — values above 100%
+        // are valid; the engine has no upper clamp on earlyReflectionLevel.
+        makeRow(0,   300, 1, slERLevel, lblERLevel);
         addRow(cl, "ER Delay ms", slERDelay, lblERDelay);
         addRow(cl, "ER Level %",  slERLevel, lblERLevel);
 
         cl->addWidget(makeLabel("Late Tail", 11, false, "#aaa"));
-        makeRow(0, 1000, 1, slLateLevel, lblLateLevel);
+        // Upper bound 700 to accommodate hauntedcavernv3's 667% late gain
+        // compensation — same rationale as ER Level above.
+        makeRow(0, 700, 1, slLateLevel, lblLateLevel);
         addRow(cl, "Late Reverb %", slLateLevel, lblLateLevel);
 
         cl->addWidget(makeLabel("Spectral Shaping", 11, false, "#aaa"));
-        makeRow(0,   1000,  1,  slHfDamp,   lblHfDamp);
-        makeRow(0,   1000,  1,  slLfDamp,   lblLfDamp);
-        makeRow(20,  20000, 5,  slLowCut,   lblLowCut);
-        makeRow(500, 12000, 50, sliderTone, lblToneVal);
+        makeRow(0,    100,   1,   slHfDamp,   lblHfDamp);
+        makeRow(0,    100,   1,   slLfDamp,   lblLfDamp);
+        makeRow(20,   2000,  5,   slLowCut,   lblLowCut);
+        // High Cut range matches engine clamp: 200–20000 Hz.
+        makeRow(200,  20000, 50,  sliderTone, lblToneVal);
         addRow(cl, "HF Damping %",    slHfDamp,   lblHfDamp);
         addRow(cl, "LF Damping %",    slLfDamp,   lblLfDamp);
         addRow(cl, "Low Cut Hz",      slLowCut,   lblLowCut);
         addRow(cl, "Tone / High Cut", sliderTone, lblToneVal);
 
         cl->addWidget(makeLabel("Stereo & Mix", 11, false, "#aaa"));
-        makeRow(0, 2000, 1, slRevWidth, lblRevWidth);
-        makeRow(0, 1000, 1, slWetLevel, lblWetLevel);
-        makeRow(0, 1000, 1, slDryLevel, lblDryLevel);
+        makeRow(0,  200, 1, slRevWidth, lblRevWidth);
+        makeRow(0,  100, 1, slWetLevel, lblWetLevel);
+        makeRow(0,  100, 1, slDryLevel, lblDryLevel);
         addRow(cl, "Stereo Width %", slRevWidth, lblRevWidth);
         addRow(cl, "Wet Level %",    slWetLevel, lblWetLevel);
         addRow(cl, "Dry Level %",    slDryLevel, lblDryLevel);

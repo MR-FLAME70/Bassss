@@ -205,7 +205,7 @@ QWidget* LiveTab::buildReverbColumn() {
     lay->addWidget(comboPreset);
 
     lay->addWidget(makeDimLabel("Mix (%)"));
-    makeRow(0, 1000, 1, sliderReverbMix, lblReverbMixVal, "74 %");
+    makeRow(0, 100, 1, sliderReverbMix, lblReverbMixVal, "74 %");
     {
         auto* row = new QHBoxLayout();
         row->setSpacing(10);
