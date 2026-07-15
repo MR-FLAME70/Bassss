@@ -12,13 +12,16 @@ class AudioProcessor;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // LiveTab — the first tab in the main window.
-// Matches the Live Tab Audio grid from popup.html:
-//   Left column:   Bass Boost controls + Volume
-//   Center column: "Main" — the everyday reverb controls:
-//                    Reverb Enable → Effect Amount → Preset → Mix.
-//                    The deep-dive parameter set lives exclusively in the
-//                    "Advanced Reverb Engine" collapsible on the Advanced tab.
-//   Right column:  Output controls (record, VU meter, spectrum, bypass)
+//
+// Layout (vertical):
+//   Top row (3 equal columns):
+//     Left   — Bass Boost controls + Volume
+//     Center — "Main": everyday reverb controls (Enable, Amount, Preset, Mix)
+//     Right  — Output (VU meter, spectrum, A/B bypass, record)
+//   Bottom section (full width):
+//     Basic Echo — all 8 controls wired to EchoEngine DSP:
+//       Delay Time · Feedback · Num Echoes · Echo Amount
+//       Wet Level  · Dry Level · Wet/Dry Mix · Output Gain
 // ──────────────────────────────────────────────────────────────────────────────
 class LiveTab : public QWidget {
     Q_OBJECT
@@ -41,7 +44,7 @@ private slots:
 private:
     AudioProcessor* m_proc;
 
-    // Bass column
+    // ── Bass column ───────────────────────────────────────────────────────────
     DarkSlider*  sliderFreq;
     DarkSlider*  sliderGain;
     DarkSlider*  sliderVolume;
@@ -50,16 +53,13 @@ private:
     QLabel*      lblGainVal;
     QLabel*      lblVolVal;
 
-    // ── Main reverb column — always-visible controls ────────────────────────
-    // Renamed from "Reverb" to "Main" now that the deep-dive Advanced Reverb
-    // Engine panel lives exclusively on the Advanced tab; this column only
-    // holds the everyday controls (Enable, Effect Amount, Preset, Mix).
+    // ── Main reverb column ────────────────────────────────────────────────────
     ToggleSwitch* toggleReverb;
     DarkSlider*   sliderReverbAmount;   QLabel* lblReverbAmountVal;
     QComboBox*    comboPreset;
     DarkSlider*   sliderReverbMix;      QLabel* lblReverbMixVal;
 
-    // Output column
+    // ── Output column ─────────────────────────────────────────────────────────
     VUMeter*      vuMeter;
     SpectrumWidget* spectrumW;
     ToggleSwitch* toggleSpectrum;
@@ -68,6 +68,20 @@ private:
     QLabel*       lblRecordTime;
     QLabel*       lblStatus;
 
+    // ── Basic Echo section — 8 controls, all wired to EchoEngine DSP ─────────
+    ToggleSwitch* toggleEchoEnable;
+    // Row 1
+    DarkSlider*   sliderEchoDelay;      QLabel* lblEchoDelayVal;
+    DarkSlider*   sliderEchoFeedback;   QLabel* lblEchoFeedbackVal;
+    DarkSlider*   sliderEchoNumEchoes;  QLabel* lblEchoNumEchoesVal;
+    DarkSlider*   sliderEchoAmount;     QLabel* lblEchoAmountVal;
+    // Row 2
+    DarkSlider*   sliderEchoWetLevel;   QLabel* lblEchoWetLevelVal;
+    DarkSlider*   sliderEchoDryLevel;   QLabel* lblEchoDryLevelVal;
+    DarkSlider*   sliderEchoMix;        QLabel* lblEchoMixVal;
+    DarkSlider*   sliderEchoOutputGain; QLabel* lblEchoOutputGainVal;
+
+    // ─────────────────────────────────────────────────────────────────────────
     QTimer* meterTimer;
     QTimer* spectrumTimer;
     bool    m_recording = false;
@@ -78,8 +92,10 @@ private:
     void buildUI();
     void connectSignals();
     void updateLabels();
+    void updateEchoLabels();
     void emitSettings();
     QWidget* buildBassColumn();
     QWidget* buildReverbColumn();
     QWidget* buildOutputColumn();
+    QWidget* buildEchoSection();
 };

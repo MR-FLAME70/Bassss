@@ -104,6 +104,50 @@ void AppSettings::load() {
     LOAD_B(reverbEngineOn, false);
     LOAD_B(bypass, false);
 
+    LOAD_B(echoOn, false);
+    LOAD_B(echoBypass, false);
+    LOAD_S(echoPreset, "tapeecho");
+    LOAD_F(echoDelayMs, 350.f);
+    LOAD_F(echoFeedback, 55.f);
+    LOAD_F(echoMix, 38.f);
+    LOAD_F(echoTone, 60.f);
+    LOAD_F(echoPingPong, 15.f);
+    LOAD_I(echoNumEchoes, 0);
+    LOAD_F(echoAmount, 100.f);
+    LOAD_F(echoWetLevel, 100.f);
+    LOAD_F(echoDryLevel, 100.f);
+    LOAD_F(echoOutputGain, 100.f);
+
+    // ── Advanced Echo Engine ─────────────────────────────────────────────────
+    LOAD_B(aeOn, false);
+    LOAD_F(aeLeftDelayMs,   350.f); LOAD_F(aeRightDelayMs,  350.f);
+    LOAD_F(aeStereoOffset,    0.f); LOAD_F(aeStereoWidthD,    0.f);
+    LOAD_B(aeTempoSync, false);     LOAD_B(aeMillisecondMode, true);
+    LOAD_F(aeCrossFeedback,   0.f); LOAD_F(aeFbSaturation,    0.f);
+    LOAD_F(aeFbDamping,       0.f); LOAD_F(aeFbLowCut,       20.f);
+    LOAD_F(aeFbHighCut,   20000.f); LOAD_F(aeFbDiffusion,     0.f);
+    LOAD_F(aeBalance,         0.f); LOAD_F(aeLeftLevel,     100.f);
+    LOAD_F(aeRightLevel,  100.f);   LOAD_F(aeMidSideMix,      0.f);
+    LOAD_B(aePingPongMode, false);  LOAD_B(aeSwapChannels, false);
+    LOAD_F(aeToneLowCut,    20.f);  LOAD_F(aeToneHighCut, 20000.f);
+    LOAD_F(aeToneBass,       0.f);  LOAD_F(aeToneMid,         0.f);
+    LOAD_F(aeToneTreble,     0.f);  LOAD_F(aeTonePresence,    0.f);
+    LOAD_F(aeToneBrightness, 0.f);
+    LOAD_F(aeTapeSat,        0.f);  LOAD_F(aeAnalogSat,       0.f);
+    LOAD_F(aeDrive,          0.f);  LOAD_F(aeWarmth,          0.f);
+    LOAD_B(aeSoftClip, false);
+    LOAD_F(aeInputGainDb,    0.f);  LOAD_F(aeOutputGainDb,    0.f);
+    LOAD_F(aeWetGainDb,      0.f);  LOAD_F(aeDryGainDb,       0.f);
+    LOAD_B(aeIntLimiter, false);    LOAD_B(aeSoftLimiter, false);
+    LOAD_F(aeWetLevel2,  100.f);    LOAD_F(aeDryLevel2,   100.f);
+    LOAD_F(aeBlend,      100.f);    LOAD_F(aeMixOverride,  -1.f);
+    LOAD_F(aeWow,          0.f);    LOAD_F(aeFlutter,        0.f);
+    LOAD_F(aeModDepth,     0.f);    LOAD_F(aeModRate,        1.f);
+    LOAD_F(aeRandomDrift,  0.f);
+    LOAD_F(aeHaasWidth,    0.f);    LOAD_F(aeStereoSpread,   0.f);
+    LOAD_F(aeEarlyReflections, 0.f);LOAD_F(aeReflLevel,      0.f);
+    LOAD_F(aeReflDelay,   20.f);
+
     // ── Audio routing: source + device IDs (stable string identifiers) ─────
     LOAD_S(audioSourceMode,  "playback");
     LOAD_S(playbackDeviceId, "");
@@ -156,6 +200,28 @@ void AppSettings::save() const {
     SAVE(speakerLevelFL); SAVE(speakerLevelFR); SAVE(speakerLevelC);
     SAVE(speakerLevelSub); SAVE(speakerLevelRL); SAVE(speakerLevelRR);
     SAVE(reverbEngineOn); SAVE(bypass);
+    SAVE(echoOn); SAVE(echoBypass); SAVE(echoPreset);
+    SAVE(echoDelayMs); SAVE(echoFeedback); SAVE(echoMix);
+    SAVE(echoTone); SAVE(echoPingPong);
+    SAVE(echoNumEchoes); SAVE(echoAmount); SAVE(echoWetLevel);
+    SAVE(echoDryLevel); SAVE(echoOutputGain);
+    // Advanced Echo Engine
+    SAVE(aeOn);
+    SAVE(aeLeftDelayMs); SAVE(aeRightDelayMs); SAVE(aeStereoOffset); SAVE(aeStereoWidthD);
+    SAVE(aeTempoSync); SAVE(aeMillisecondMode);
+    SAVE(aeCrossFeedback); SAVE(aeFbSaturation); SAVE(aeFbDamping);
+    SAVE(aeFbLowCut); SAVE(aeFbHighCut); SAVE(aeFbDiffusion);
+    SAVE(aeBalance); SAVE(aeLeftLevel); SAVE(aeRightLevel); SAVE(aeMidSideMix);
+    SAVE(aePingPongMode); SAVE(aeSwapChannels);
+    SAVE(aeToneLowCut); SAVE(aeToneHighCut); SAVE(aeToneBass); SAVE(aeToneMid);
+    SAVE(aeToneTreble); SAVE(aeTonePresence); SAVE(aeToneBrightness);
+    SAVE(aeTapeSat); SAVE(aeAnalogSat); SAVE(aeDrive); SAVE(aeWarmth); SAVE(aeSoftClip);
+    SAVE(aeInputGainDb); SAVE(aeOutputGainDb); SAVE(aeWetGainDb); SAVE(aeDryGainDb);
+    SAVE(aeIntLimiter); SAVE(aeSoftLimiter);
+    SAVE(aeWetLevel2); SAVE(aeDryLevel2); SAVE(aeBlend); SAVE(aeMixOverride);
+    SAVE(aeWow); SAVE(aeFlutter); SAVE(aeModDepth); SAVE(aeModRate); SAVE(aeRandomDrift);
+    SAVE(aeHaasWidth); SAVE(aeStereoSpread); SAVE(aeEarlyReflections);
+    SAVE(aeReflLevel); SAVE(aeReflDelay);
     SAVE(audioSourceMode); SAVE(playbackDeviceId); SAVE(micDeviceId); SAVE(outputDeviceId);
     SAVE(sampleRate); SAVE(bufferSize);
 #undef SAVE

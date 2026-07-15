@@ -116,6 +116,108 @@ struct AppSettings {
     // ── Advanced Reverb Engine on/off ─────────────────────────────────────────
     bool reverbEngineOn = false;
 
+    // ── Echo Engine ────────────────────────────────────────────────────────────
+    // Real-time feedback delay line (see dsp/EchoEngine.h). `echoOn` is the
+    // module power switch (included in / excluded from the signal chain);
+    // `echoBypass` is a separate true-bypass switch — when set, the DSP is
+    // skipped entirely (input passed through unmodified) even if echoOn is
+    // true, so parameters/preset stay dialed in while A/B-comparing, exactly
+    // like a bypass footswitch on a hardware delay pedal.
+    bool  echoOn      = false;
+    bool  echoBypass  = false;
+    QString echoPreset = "tapeecho";
+    float echoDelayMs   = 350.f;  // ms
+    float echoFeedback  = 55.f;   // %
+    float echoMix       = 38.f;   // % wet/dry crossfade
+    float echoTone      = 60.f;   // % damping (repeat darkening)
+    float echoPingPong  = 15.f;   // % stereo cross-feed
+
+    // ── Basic Echo section — additional controls ───────────────────────────
+    // These map to the extended EchoEngine::Params fields added alongside
+    // the Basic Echo UI panel. All stored as % (0-100) except numEchoes
+    // (integer 0-10) and outputGain (0-200 % so unity = 100).
+    int   echoNumEchoes  = 0;      // 0 = infinite/feedback, 1-10 = discrete taps
+    float echoAmount     = 100.f;  // % input drive into the delay line
+    float echoWetLevel   = 100.f;  // % wet (effected) signal level
+    float echoDryLevel   = 100.f;  // % dry (original) signal level
+    float echoOutputGain = 100.f;  // % post-mix output gain (100 = unity)
+
+    // ── Advanced Echo Engine ─────────────────────────────────────────────────
+    // All stored in natural UI units (ms, dB, %, Hz, bool). The AudioProcessor
+    // converts to normalised EchoEngine::Params values before calling setParams.
+    // `aeOn` is the Advanced Echo Engine section's collapse/enable toggle;
+    // when false all ae* params are passed as neutral defaults so the DSP
+    // sounds identical to the basic echo path.
+    bool  aeOn = false;
+
+    // [Delay]
+    float aeLeftDelayMs   = 350.f;  // ms
+    float aeRightDelayMs  = 350.f;  // ms
+    float aeStereoOffset  = 0.f;    // ms ±200
+    float aeStereoWidthD  = 0.f;    // % 0-100
+    bool  aeTempoSync     = false;
+    bool  aeMillisecondMode = true;
+
+    // [Feedback]
+    float aeCrossFeedback = 0.f;     // % 0-100
+    float aeFbSaturation  = 0.f;     // % 0-100
+    float aeFbDamping     = 0.f;     // % 0-100
+    float aeFbLowCut      = 20.f;    // Hz
+    float aeFbHighCut     = 20000.f; // Hz
+    float aeFbDiffusion   = 0.f;     // % 0-100
+
+    // [Stereo]
+    float aeBalance     = 0.f;    // -100..+100
+    float aeLeftLevel   = 100.f;  // %
+    float aeRightLevel  = 100.f;  // %
+    float aeMidSideMix  = 0.f;    // %
+    bool  aePingPongMode  = false;
+    bool  aeSwapChannels  = false;
+
+    // [Tone]
+    float aeToneLowCut    = 20.f;    // Hz
+    float aeToneHighCut   = 20000.f; // Hz
+    float aeToneBass      = 0.f;     // dB
+    float aeToneMid       = 0.f;     // dB
+    float aeToneTreble    = 0.f;     // dB
+    float aeTonePresence  = 0.f;     // dB
+    float aeToneBrightness = 0.f;    // dB
+
+    // [Saturation]
+    float aeTapeSat   = 0.f;   // %
+    float aeAnalogSat = 0.f;   // %
+    float aeDrive     = 0.f;   // %
+    float aeWarmth    = 0.f;   // %
+    bool  aeSoftClip  = false;
+
+    // [Dynamics]
+    float aeInputGainDb  = 0.f;  // dB
+    float aeOutputGainDb = 0.f;  // dB
+    float aeWetGainDb    = 0.f;  // dB
+    float aeDryGainDb    = 0.f;  // dB
+    bool  aeIntLimiter   = false;
+    bool  aeSoftLimiter  = false;
+
+    // [Mix]
+    float aeWetLevel2 = 100.f;  // % secondary wet level
+    float aeDryLevel2 = 100.f;  // % secondary dry level
+    float aeBlend     = 100.f;  // % master blend
+    float aeMixOverride = -1.f; // ≥0 overrides basic mix; -1 = use basic
+
+    // [Modulation]
+    float aeWow         = 0.f;  // %
+    float aeFlutter     = 0.f;  // %
+    float aeModDepth    = 0.f;  // %
+    float aeModRate     = 1.f;  // Hz
+    float aeRandomDrift = 0.f;  // %
+
+    // [Spatial]
+    float aeHaasWidth       = 0.f;   // ms 0-40
+    float aeStereoSpread    = 0.f;   // %
+    float aeEarlyReflections = 0.f;  // %
+    float aeReflLevel       = 0.f;   // %
+    float aeReflDelay       = 20.f;  // ms
+
     // ── A/B bypass ───────────────────────────────────────────────────────────
     bool bypass = false;
 

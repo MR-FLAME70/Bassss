@@ -59,6 +59,7 @@ void AudioProcessor::setSampleRate(double sr) {
     limiter.setSampleRate(sr);
     pitchShifter.setSampleRate(sr);
     speakerConfig.setSampleRate(sr);
+    echoEngine.setSampleRate(sr);
 
     // (Re)initialize gain smoothers for the new rate. ~8ms is short enough
     // to feel instant on a slider drag but long enough (several hundred
@@ -215,6 +216,99 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
     pitchOn.store(s.pitchOn);
     if (s.pitchOn) pitchShifter.setPitchSemitones(s.pitch);
 
+    // ── Echo Engine ────────────────────────────────────────────────────────────
+    echoOn.store(s.echoOn);
+    echoBypass.store(s.echoBypass);
+    if (s.echoOn) {
+        EchoEngine::Params ep;
+
+        // ── Basic / shared controls ─────────────────────────────────────────
+        ep.delayMs    = s.echoDelayMs;
+        ep.feedback   = s.echoFeedback   / 100.f;
+        ep.mix        = s.echoMix        / 100.f;
+        ep.tone       = s.echoTone       / 100.f;
+        ep.pingPong   = s.echoPingPong   / 100.f;
+        ep.numEchoes  = s.echoNumEchoes;
+        ep.echoAmount = s.echoAmount     / 100.f;
+        ep.wetLevel   = s.echoWetLevel   / 100.f;
+        ep.dryLevel   = s.echoDryLevel   / 100.f;
+        ep.outputGain = s.echoOutputGain / 100.f;
+
+        // ── Advanced Echo Engine controls ─────────────────────────────────────
+        ep.aeOn = s.aeOn;
+        // Per-channel delays: always set so the delay line tracks echoDelayMs
+        // even when the advanced engine is off (aeOn gate in EchoEngine selects
+        // which value to actually use, but we keep them in sync here).
+        ep.aeLeftDelayMs  = s.aeOn ? s.aeLeftDelayMs  : s.echoDelayMs;
+        ep.aeRightDelayMs = s.aeOn ? s.aeRightDelayMs : s.echoDelayMs;
+
+        if (s.aeOn) {
+            // [Delay] (aeLeft/RightDelayMs already set above)
+            ep.aeStereoOffset  = s.aeStereoOffset;
+            ep.aeStereoWidthD  = s.aeStereoWidthD  / 100.f;
+            ep.aeTempoSync     = s.aeTempoSync;
+            ep.aeMillisecondMode = s.aeMillisecondMode;
+            // [Feedback]
+            ep.aeCrossFeedback = s.aeCrossFeedback / 100.f;
+            ep.aeFbSaturation  = s.aeFbSaturation  / 100.f;
+            ep.aeFbDamping     = s.aeFbDamping     / 100.f;
+            ep.aeFbLowCut      = s.aeFbLowCut;
+            ep.aeFbHighCut     = s.aeFbHighCut;
+            ep.aeFbDiffusion   = s.aeFbDiffusion   / 100.f;
+            // [Stereo]
+            ep.aeBalance       = s.aeBalance       / 100.f;   // ±1
+            ep.aeLeftLevel     = s.aeLeftLevel      / 100.f;
+            ep.aeRightLevel    = s.aeRightLevel     / 100.f;
+            ep.aeMidSideMix    = s.aeMidSideMix    / 100.f;
+            ep.aePingPongMode  = s.aePingPongMode;
+            ep.aeSwapChannels  = s.aeSwapChannels;
+            // [Tone]
+            ep.aeToneLowCut    = s.aeToneLowCut;
+            ep.aeToneHighCut   = s.aeToneHighCut;
+            ep.aeToneBass      = s.aeToneBass;        // already in dB
+            ep.aeToneMid       = s.aeToneMid;
+            ep.aeToneTreble    = s.aeToneTreble;
+            ep.aeTonePresence  = s.aeTonePresence;
+            ep.aeToneBrightness= s.aeToneBrightness;
+            // [Saturation]
+            ep.aeTapeSat       = s.aeTapeSat        / 100.f;
+            ep.aeAnalogSat     = s.aeAnalogSat      / 100.f;
+            ep.aeDrive         = s.aeDrive          / 100.f;
+            ep.aeWarmth        = s.aeWarmth         / 100.f;
+            ep.aeSoftClip      = s.aeSoftClip;
+            // [Dynamics]
+            ep.aeInputGainDb   = s.aeInputGainDb;    // already in dB
+            ep.aeOutputGainDb  = s.aeOutputGainDb;
+            ep.aeWetGainDb     = s.aeWetGainDb;
+            ep.aeDryGainDb     = s.aeDryGainDb;
+            ep.aeIntLimiter    = s.aeIntLimiter;
+            ep.aeSoftLimiter   = s.aeSoftLimiter;
+            // [Mix]
+            ep.aeWetLevel2     = s.aeWetLevel2      / 100.f;
+            ep.aeDryLevel2     = s.aeDryLevel2      / 100.f;
+            ep.aeBlend         = s.aeBlend          / 100.f;
+            ep.aeMix           = (s.aeMixOverride >= 0.f)
+                                   ? s.aeMixOverride / 100.f
+                                   : -1.f; // -1 → use basic mix
+            // [Modulation]
+            ep.aeWow           = s.aeWow            / 100.f;
+            ep.aeFlutter       = s.aeFlutter        / 100.f;
+            ep.aeModDepth      = s.aeModDepth       / 100.f;
+            ep.aeModRate       = s.aeModRate;        // Hz, no scaling
+            ep.aeRandomDrift   = s.aeRandomDrift    / 100.f;
+            // [Spatial]
+            ep.aeHaasWidth        = s.aeHaasWidth;   // ms, no scaling
+            ep.aeStereoSpread     = s.aeStereoSpread / 100.f;
+            ep.aeEarlyReflections = s.aeEarlyReflections / 100.f;
+            ep.aeReflLevel        = s.aeReflLevel    / 100.f;
+            ep.aeReflDelay        = s.aeReflDelay;   // ms, no scaling
+        }
+        // When aeOn=false the Params struct keeps its neutral defaults above,
+        // so only the basic signal path runs with no observable change.
+
+        echoEngine.setParams(ep);
+    }
+
     // Speaker config
     speakerConfigOn.store(s.speakerConfigOn);
     if (s.speakerConfigOn) {
@@ -318,6 +412,12 @@ void AudioProcessor::processStereo(float& l, float& r) {
 
     // ── Acoustic Engine ────────────────────────────────────────────────────────
     if (acousticEngineOn.load()) acousticEngine.processStereo(outL, outR);
+
+    // ── Echo Engine ────────────────────────────────────────────────────────────
+    // True bypass: when echoBypass is set, the DSP call is skipped entirely
+    // (not just muted) — audio passes through this stage completely
+    // untouched, regardless of echoOn's stored parameters/preset.
+    if (echoOn.load() && !echoBypass.load()) echoEngine.processStereo(outL, outR);
 
     // ── Advanced Audio chain ──────────────────────────────────────────────────
     if (eqOn.load())          equalizer.processStereo(outL, outR);

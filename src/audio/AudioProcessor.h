@@ -21,6 +21,7 @@
 #include "../dsp/PitchShifter.h"
 #include "../dsp/Rotator.h"
 #include "../dsp/ClampProcessor.h"
+#include "../dsp/EchoEngine.h"
 
 // ── ParamSmoother ────────────────────────────────────────────────────────────
 // One-pole exponential smoother for control-rate values (gains, mix levels)
@@ -138,6 +139,7 @@ private:
     PitchShifter   pitchShifter;
     SpeakerConfig  speakerConfig;
     ClampProcessor clamp;
+    EchoEngine     echoEngine;
 
     // Module on/off flags (std::atomic<bool> for thread safety)
     std::atomic<bool> acousticEngineOn{false};
@@ -149,6 +151,11 @@ private:
     std::atomic<bool> pitchOn{false};
     std::atomic<bool> speakerConfigOn{false};
     std::atomic<bool> reverbOn{false};
+    // Echo: two independent flags so a true-bypass switch can pass audio
+    // through untouched without disabling/losing the module's dialed-in
+    // parameters (see AppSettings::echoBypass doc comment).
+    std::atomic<bool> echoOn{false};
+    std::atomic<bool> echoBypass{false};
 
     // ── VU meter / Spectrum (ring-buffer) ────────────────────────────────────
     static constexpr int METER_BUF = 1024;
