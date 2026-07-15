@@ -4,51 +4,116 @@
 #include <QPainterPath>
 #include <QFont>
 #include <QFontMetrics>
+#include <QGraphicsDropShadowEffect>
+#include <QEasingCurve>
 #include <cmath>
 #include <algorithm>
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ToggleSwitch
 // ──────────────────────────────────────────────────────────────────────────────
+namespace {
+// QColor's constructor isn't constexpr, so these are plain const globals.
+const QColor kAccentGreen      (0x22, 0xc5, 0x5e); // functional "engaged" accent, reused from status color
+const QColor kAccentGreenLight (0x4a, 0xde, 0x80);
+const QColor kOffTrack         (0x1a, 0x1a, 0x1a);
+const QColor kOffBorder        (0x33, 0x33, 0x33);
+const QColor kOffThumb         (0x5a, 0x5a, 0x5a);  // dim, deliberately "unlit"
+}
+
 ToggleSwitch::ToggleSwitch(QWidget* parent) : QWidget(parent) {
     setFixedSize(44, 24);
     setCursor(Qt::PointingHandCursor);
-    connect(&m_anim, &QTimer::timeout, this, [this]{
-        // Ease-out: step proportionally to remaining distance for a softer,
-        // more natural settle instead of a constant-speed slide.
-        float remaining = m_targetX - m_thumbX;
-        if (std::abs(remaining) < 0.4f) {
-            m_thumbX = m_targetX; m_anim.stop();
-        } else {
-            m_thumbX += remaining * 0.35f;
-        }
-        update();
-    });
+
+    m_posAnim = new QPropertyAnimation(this, "thumbPos", this);
+    m_posAnim->setDuration(200);
+    m_posAnim->setEasingCurve(QEasingCurve::OutCubic);
+
+    m_progAnim = new QPropertyAnimation(this, "onProgress", this);
+    m_progAnim->setDuration(200);
+    m_progAnim->setEasingCurve(QEasingCurve::OutCubic);
+
+    // Soft green bloom around the whole switch when engaged. Kept at zero
+    // alpha (invisible) while off so the "glow" reads as something that
+    // switches on, not a permanent halo.
+    m_glow = new QGraphicsDropShadowEffect(this);
+    m_glow->setColor(QColor(kAccentGreen.red(), kAccentGreen.green(), kAccentGreen.blue(), 0));
+    m_glow->setBlurRadius(16);
+    m_glow->setOffset(0, 0);
+    setGraphicsEffect(m_glow);
 }
 
 void ToggleSwitch::setChecked(bool on) {
     if (m_checked == on) return;
     m_checked = on;
-    m_targetX = on ? 22.f : 4.f;
-    m_anim.start(16);
+
+    m_posAnim->stop();
+    m_posAnim->setStartValue(m_thumbPos);
+    m_posAnim->setEndValue(on ? 1.0 : 0.0);
+    m_posAnim->start();
+
+    m_progAnim->stop();
+    m_progAnim->setStartValue(m_onProgress);
+    m_progAnim->setEndValue(on ? 1.0 : 0.0);
+    m_progAnim->start();
+
     emit toggled(on);
+}
+
+void ToggleSwitch::setOnProgress(qreal t) {
+    m_onProgress = t;
+    // Subtle by design — max alpha ~90 keeps it a soft bloom, not a halo.
+    int alpha = int(90 * t);
+    m_glow->setColor(QColor(kAccentGreen.red(), kAccentGreen.green(), kAccentGreen.blue(), alpha));
+    update();
 }
 
 void ToggleSwitch::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    QColor track = m_checked ? QColor(0xe8,0xe8,0xe8) : QColor(0x2a,0x2a,0x2a);
-    p.setPen(QPen(QColor(m_checked ? 0xe8 : 0x3a, m_checked ? 0xe8 : 0x3a, m_checked ? 0xe8 : 0x3a), 1));
-    p.setBrush(track);
-    p.drawRoundedRect(QRectF(0.5, 4.5, 43, 15), 7.5, 7.5);
+    const qreal t = m_onProgress;
+    auto lerp = [t](int a, int b) { return a + int((b - a) * t); };
 
-    // Thumb — subtle drop shadow for depth, plain white face
+    // Track: crossfades from flat unlit dark to a filled green gradient as
+    // onProgress goes 0 -> 1, so ON/OFF read as distinctly different states
+    // rather than a shade of the same gray.
+    QColor borderColor(
+        lerp(kOffBorder.red(),   kAccentGreenLight.red()),
+        lerp(kOffBorder.green(), kAccentGreenLight.green()),
+        lerp(kOffBorder.blue(),  kAccentGreenLight.blue()));
+
+    QRectF trackRect(0.5, 4.5, 43, 15);
+    p.setPen(QPen(borderColor, 1));
+    // Flat unlit base, then a green gradient fades in on top of it (alpha
+    // rises with onProgress) — draws as a clean crossfade between the two
+    // distinct looks rather than a muddy gray-to-green blend.
+    p.setBrush(kOffTrack);
+    p.drawRoundedRect(trackRect, 7.5, 7.5);
+    if (t > 0.001) {
+        QColor top = kAccentGreenLight; top.setAlphaF(t);
+        QColor bot = kAccentGreen;      bot.setAlphaF(t);
+        QLinearGradient fadeGrad(trackRect.topLeft(), trackRect.bottomLeft());
+        fadeGrad.setColorAt(0.0, top);
+        fadeGrad.setColorAt(1.0, bot);
+        p.setBrush(fadeGrad);
+        p.drawRoundedRect(trackRect, 7.5, 7.5);
+    }
+
+    // Thumb position: 4..22 px, matches the original travel range.
+    qreal thumbX = 4.0 + (22.0 - 4.0) * m_thumbPos;
+
+    // Thumb — subtle drop shadow for depth, face crossfades dim-gray -> white.
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor(0,0,0,60));
-    p.drawEllipse(QRectF(m_thumbX, 3, 20, 20));
-    p.setBrush(m_checked ? Qt::white : QColor(0xcf,0xcf,0xcf));
-    p.drawEllipse(QRectF(m_thumbX, 2, 20, 20));
+    p.setBrush(QColor(0, 0, 0, 60));
+    p.drawEllipse(QRectF(thumbX, 3, 20, 20));
+
+    QColor thumbColor(
+        lerp(kOffThumb.red(),   255),
+        lerp(kOffThumb.green(), 255),
+        lerp(kOffThumb.blue(),  255));
+    p.setBrush(thumbColor);
+    p.drawEllipse(QRectF(thumbX, 2, 20, 20));
 }
 
 void ToggleSwitch::mousePressEvent(QMouseEvent*) {

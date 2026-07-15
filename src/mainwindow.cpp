@@ -124,40 +124,17 @@ void MainWindow::buildUI() {
     // 1. Custom title bar
     root->addWidget(buildTitleBar());
 
-    // 2. Tab bar
-    // Now that File Export is gone, only 3 tabs remain. Expand them to share
-    // the full title-bar width evenly instead of clumping left with a dead
-    // gap on the right, and center each tab's contents for a balanced look.
-    m_tabBar = new QTabBar();
-    m_tabBar->addTab("🎵 Live Tab Audio");
-    m_tabBar->addTab("⚙ Advanced");
-    m_tabBar->addTab("🎚 Advanced Audio");
-    m_tabBar->setExpanding(true);
-    m_tabBar->setElideMode(Qt::ElideNone);
-    m_tabBar->setStyleSheet(R"(
-        QTabBar {
-            background: #0a0a0a;
-            border-bottom: 1px solid #232323;
-        }
-        QTabBar::tab {
-            background: transparent;
-            color: #7a7a7a;
-            padding: 10px 20px;
-            font-size: 12px;
-            letter-spacing: 0.3px;
-            border: none;
-            border-bottom: 2px solid transparent;
-            margin-right: 2px;
-            alignment: center;
-        }
-        QTabBar::tab:selected {
-            color: #ffffff;
-            border-bottom: 2px solid #e8e8e8;
-            font-weight: 600;
-        }
-        QTabBar::tab:hover:!selected { color: #d0d0d0; }
-    )");
-    connect(m_tabBar, &QTabBar::currentChanged, this, &MainWindow::onTabChanged);
+    // 2. Tab bar — pill-shaped segmented control (custom-painted, animated).
+    // Left-aligned with natural (text-sized) tab widths, matching the
+    // reference: a solid white rounded pill on the active tab with black
+    // text, gray text with no background on inactive tabs, and the pill
+    // slides smoothly between tabs on selection with a soft hover fade on
+    // the others.
+    m_tabBar = new PillTabBar();
+    m_tabBar->addTab("🎵  LIVE TAB AUDIO");
+    m_tabBar->addTab("⚙  ADVANCED");
+    m_tabBar->addTab("🎚  ADVANCED AUDIO");
+    connect(m_tabBar, &PillTabBar::currentChanged, this, &MainWindow::onTabChanged);
     root->addWidget(m_tabBar);
 
     // 3. Tab content (stacked)
@@ -170,9 +147,6 @@ void MainWindow::buildUI() {
     stack->addWidget(m_advAudioTab);
     m_stack = stack;
     root->addWidget(stack, 1);
-
-    // 4. Status bar
-    root->addWidget(buildStatusBar());
 
     // Wire settings-changed signals
     connect(m_liveTab,     &LiveTab::settingsChanged,         this, &MainWindow::onSettingsChanged);
@@ -354,35 +328,6 @@ QWidget* MainWindow::buildTitleBar() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Status bar
-// ──────────────────────────────────────────────────────────────────────────────
-QWidget* MainWindow::buildStatusBar() {
-    auto* bar = new QWidget();
-    bar->setFixedHeight(22);
-    // Round only the bottom two corners, mirroring the title bar's top ones.
-    bar->setStyleSheet(QString(
-        "background: #0a0a0a; border-top: 1px solid #1a1a1a;"
-        "border-bottom-left-radius: %1px; border-bottom-right-radius: %1px;"
-    ).arg(kCornerRadius));
-    auto* lay = new QHBoxLayout(bar);
-    lay->setContentsMargins(12,0,12,0);
-
-    m_statusLabel = new QLabel("Stopped");
-    m_statusLabel->setStyleSheet("color: #666; font-size: 10px;");
-    m_deviceLabel = new QLabel("48000 Hz · stereo");
-    m_deviceLabel->setStyleSheet("color: #444; font-size: 10px;");
-    auto* ver = new QLabel("Bass Nuker v6.9.0");
-    ver->setStyleSheet("color: #333; font-size: 10px;");
-
-    lay->addWidget(m_statusLabel);
-    lay->addStretch();
-    lay->addWidget(m_deviceLabel);
-    lay->addStretch();
-    lay->addWidget(ver);
-    return bar;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Device enumeration & dropdown population
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::populateDeviceDropdowns() {
@@ -542,14 +487,6 @@ void MainWindow::startCapture() {
     m_btnStart->setText("■ Stop");
     m_btnStart->setChecked(true);
 
-    // Status message reflects capture mode
-    bool isLoopback = (selectedInputType() == AudioDeviceType::Loopback);
-    m_statusLabel->setText(isLoopback ? "Running · WASAPI Loopback"
-                                      : "Running · Microphone");
-    m_statusLabel->setStyleSheet("color: #22c55e; font-size: 10px;");
-    m_deviceLabel->setText(QString("%1 Hz · stereo")
-                           .arg((int)m_capture->actualSampleRate()));
-
     m_liveTab->startAudioDevice(0, 0, m_capture->actualSampleRate(), s.bufferSize);
     m_proc->applySettings(s);
 }
@@ -559,8 +496,6 @@ void MainWindow::stopCapture() {
     m_running = false;
     m_btnStart->setText("▶ Start");
     m_btnStart->setChecked(false);
-    m_statusLabel->setText("Stopped");
-    m_statusLabel->setStyleSheet("color: #666; font-size: 10px;");
     m_liveTab->stopAudioDevice();
 }
 

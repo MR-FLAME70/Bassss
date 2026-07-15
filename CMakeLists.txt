@@ -85,6 +85,7 @@ set(SOURCES
     src/ui/AdvancedTab.cpp
     src/ui/AdvancedAudioTab.cpp
     src/ui/CustomWidgets.cpp
+    src/ui/PillTabBar.cpp
     resources/resources.qrc
 )
 
@@ -110,6 +111,7 @@ set(HEADERS
     src/ui/AdvancedTab.h
     src/ui/AdvancedAudioTab.h
     src/ui/CustomWidgets.h
+    src/ui/PillTabBar.h
 )
 
 if(WIN32)

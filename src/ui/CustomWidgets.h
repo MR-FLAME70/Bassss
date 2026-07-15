@@ -25,16 +25,35 @@
 //   status (functional only, not decorative): #22c55e ok, #ef4444 stop/clip
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ── Toggle switch (CSS custom toggle) ─────────────────────────────────────────
+// ── Toggle switch — professional audio-gear "engaged" style ───────────────────
+// OFF: flat, unlit dark track + dim gray thumb (deliberately inert-looking).
+// ON:  track fills with the app's functional accent green, thumb turns
+//      bright white, and a soft green glow blooms around the whole switch —
+//      the same "this module is lit up and running" language real hardware
+//      effects units use, reusing the accent already defined for functional
+//      status (#22c55e) rather than inventing a new color.
+// Both the thumb slide and the color/glow crossfade are driven by
+// QPropertyAnimation (not manual per-frame stepping) for consistent,
+// frame-rate-independent easing.
 class ToggleSwitch : public QWidget {
     Q_OBJECT
     Q_PROPERTY(bool checked READ isChecked WRITE setChecked NOTIFY toggled)
+    Q_PROPERTY(qreal thumbPos READ thumbPos WRITE setThumbPos)
+    Q_PROPERTY(qreal onProgress READ onProgress WRITE setOnProgress)
 public:
     explicit ToggleSwitch(QWidget* parent = nullptr);
     bool isChecked() const { return m_checked; }
     void setChecked(bool on);
     QSize sizeHint() const override { return {44,24}; }
     QSize minimumSizeHint() const override { return {44,24}; }
+
+    qreal thumbPos() const { return m_thumbPos; }
+    void setThumbPos(qreal t) { m_thumbPos = t; update(); }
+
+    // 0 = fully OFF look, 1 = fully ON look. Drives track color and glow
+    // strength together so they crossfade in lockstep with the thumb slide.
+    qreal onProgress() const { return m_onProgress; }
+    void setOnProgress(qreal t);
 
 signals:
     void toggled(bool checked);
@@ -44,10 +63,13 @@ protected:
     void mousePressEvent(QMouseEvent*) override;
 
 private:
-    bool   m_checked = false;
-    QTimer m_anim;
-    float  m_thumbX  = 4.f; // animated thumb position
-    float  m_targetX = 4.f;
+    bool   m_checked   = false;
+    qreal  m_thumbPos   = 0.0; // 0 = left (off), 1 = right (on)
+    qreal  m_onProgress = 0.0; // 0..1 crossfade between off/on visual style
+
+    QPropertyAnimation* m_posAnim;
+    QPropertyAnimation* m_progAnim;
+    class QGraphicsDropShadowEffect* m_glow;
 };
 
 // ── Vertical / horizontal slider (matching popup.css slider style) ─────────────

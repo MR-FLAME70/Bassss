@@ -1,6 +1,6 @@
 #pragma once
 #include <QMainWindow>
-#include <QTabBar>
+#include "ui/PillTabBar.h"
 #include <QWidget>
 #include <QLabel>
 #include <QPushButton>
@@ -91,11 +91,8 @@ private:
 
     // UI
     QWidget*        m_titleBar;
-    QTabBar*        m_tabBar;
+    PillTabBar*     m_tabBar;
     QWidget*        m_stack;
-    QWidget*        m_statusBar;
-    QLabel*         m_statusLabel;
-    QLabel*         m_deviceLabel;
     QPushButton*    m_btnStart;
 
     // Audio Source (Microphone / Playback Device) + its two independent
@@ -115,7 +112,6 @@ private:
     void buildUI();
     QWidget* buildTitleBar();
     QWidget* buildTabBar();
-    QWidget* buildStatusBar();
     void     applyDarkTheme();
     void     populateDeviceDropdowns();
     void     persistDeviceSelection();
