@@ -13,23 +13,50 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
 # ── PortAudio ────────────────────────────────────────────────────────────────
 # On Windows: install PortAudio 19 (e.g. via vcpkg: vcpkg install portaudio)
 # On other platforms: brew install portaudio / apt install libportaudio2
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(PORTAUDIO portaudio-2.0)
+#
+# Preferred path: vcpkg (and modern PortAudio installs generally) ship a real
+# CMake package config exposing an imported target ("portaudio") that carries
+# its own full, correct path to the .lib/.dll — no path guessing needed, and
+# it works whether vcpkg is in classic mode (C:/vcpkg/installed/...) or
+# manifest mode (<build-dir>/vcpkg_installed/...), since the toolchain file
+# already points find_package() at the right triplet directory.
+find_package(portaudio CONFIG QUIET)
+if(TARGET portaudio)
+    set(PORTAUDIO_FOUND TRUE)
+    set(PORTAUDIO_TARGET portaudio)
 endif()
 
 if(NOT PORTAUDIO_FOUND)
-    # Fallback: look in common paths
+    # Fallback for systems without a CMake package config (typical of
+    # apt/Homebrew installs on Linux/macOS, which rely on pkg-config).
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(PORTAUDIO portaudio-2.0)
+        if(PORTAUDIO_FOUND)
+            # pkg_check_modules only returns bare library names
+            # (e.g. "portaudio"), not full paths — without also telling the
+            # linker which directory to search, it fails with
+            # "cannot open input file 'portaudio.lib'"/"-lportaudio not
+            # found". LINK_DIRECTORIES must be set explicitly.
+            link_directories(${PORTAUDIO_LIBRARY_DIRS})
+        endif()
+    endif()
+endif()
+
+if(NOT PORTAUDIO_FOUND)
+    # Last resort: manual search in common install locations.
     find_library(PORTAUDIO_LIBRARIES NAMES portaudio portaudio_x64 portaudio_x86
         PATHS
             "C:/vcpkg/installed/x64-windows/lib"
             "C:/vcpkg/installed/x86-windows/lib"
+            "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/lib"
             "/usr/local/lib" "/usr/lib"
     )
     find_path(PORTAUDIO_INCLUDE_DIRS portaudio.h
         PATHS
             "C:/vcpkg/installed/x64-windows/include"
             "C:/vcpkg/installed/x86-windows/include"
+            "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include"
             "/usr/local/include" "/usr/include"
     )
     if(PORTAUDIO_LIBRARIES AND PORTAUDIO_INCLUDE_DIRS)
@@ -150,7 +177,8 @@ target_link_libraries(BassNuker PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Multimedia
-    ${PORTAUDIO_LIBRARIES}
+    $<$<BOOL:${PORTAUDIO_TARGET}>:${PORTAUDIO_TARGET}>
+    $<$<NOT:$<BOOL:${PORTAUDIO_TARGET}>>:${PORTAUDIO_LIBRARIES}>
 )
 
 if(SNDFILE_FOUND)
