@@ -81,6 +81,7 @@ set(SOURCES
     src/dsp/SpeakerConfig.cpp
     src/dsp/DynamicBass.cpp
     src/dsp/ClampProcessor.cpp
+    src/dsp/EchoEngine.cpp
     src/ui/LiveTab.cpp
     src/ui/AdvancedTab.cpp
     src/ui/AdvancedAudioTab.cpp
@@ -109,6 +110,7 @@ set(HEADERS
     src/dsp/SpeakerConfig.h
     src/dsp/DynamicBass.h
     src/dsp/ClampProcessor.h
+    src/dsp/EchoEngine.h
     src/ui/LiveTab.h
     src/ui/AdvancedTab.h
     src/ui/AdvancedAudioTab.h
