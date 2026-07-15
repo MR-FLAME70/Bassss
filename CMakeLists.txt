@@ -61,6 +61,20 @@ if(NOT SNDFILE_FOUND)
     endif()
 endif()
 
+# pkg_check_modules() (used above for both PortAudio and libsndfile) sets
+# XXX_LIBRARIES to bare library names (e.g. "portaudio"), not full paths.
+# MSVC's linker can't resolve a bare name unless its containing directory is
+# also on the linker's search path, so add PORTAUDIO_LIBRARY_DIRS /
+# SNDFILE_LIBRARY_DIRS (when set) explicitly. Without this, linking fails
+# with LNK1181: cannot open input file 'portaudio.lib' even though
+# PORTAUDIO_FOUND is TRUE.
+if(PORTAUDIO_LIBRARY_DIRS)
+    link_directories(${PORTAUDIO_LIBRARY_DIRS})
+endif()
+if(SNDFILE_LIBRARY_DIRS)
+    link_directories(${SNDFILE_LIBRARY_DIRS})
+endif()
+
 # ── Sources ──────────────────────────────────────────────────────────────────
 set(SOURCES
     src/main.cpp
