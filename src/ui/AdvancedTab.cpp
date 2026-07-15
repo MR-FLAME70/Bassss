@@ -110,9 +110,66 @@ void AdvancedTab::buildUI() {
         vlay->addWidget(sectionSpeaker);
     }
 
-    // Advanced Reverb Engine now lives inside the redesigned Reverb section
-    // on the Live tab (see LiveTab::buildReverbColumn) — it is no longer a
-    // separate section here, so the whole Reverb feature reads as one unit.
+    // ── Advanced Reverb Engine ────────────────────────────────────────────────
+    // Mirrors the collapsible section on the Live tab's Reverb card exactly
+    // (same grouping, same fields) so users who look for it on either tab
+    // find it — both copies write to the same AppSettings fields and stay
+    // in sync via MainWindow's broadcast refreshFromSettings.
+    {
+        sectionAdvancedReverb = new CollapsibleSection("Advanced Reverb Engine");
+        toggleReverbEngine    = sectionAdvancedReverb->toggle();
+        auto* cl = new QVBoxLayout(sectionAdvancedReverb->content());
+        cl->setContentsMargins(0,0,0,0);
+        cl->setSpacing(10);
+
+        cl->addWidget(makeLabel("Envelope", 11, false, "#aaa"));
+        makeRow(0.1f, 250.f, 0.01f, sliderDecay,    lblDecayVal);
+        makeRow(0,    1500,  1,     sliderPredelay, lblPredelayVal);
+        makeRow(0,    900,   1,     sliderDiffuse,  lblDiffuseVal);
+        addRow(cl, "Decay (s)",      sliderDecay,    lblDecayVal);
+        addRow(cl, "Pre-delay (ms)", sliderPredelay, lblPredelayVal);
+        addRow(cl, "Diffusion (%)",  sliderDiffuse,  lblDiffuseVal);
+
+        cl->addWidget(makeLabel("Room Character", 11, false, "#aaa"));
+        makeRow(0.25, 30,   0.05, slRoomSize, lblRoomSize);
+        makeRow(0,    1000, 1,    slDensity,  lblDensity);
+        makeRow(0,    1000, 1,    slModDepth, lblModDepth);
+        makeRow(0,    1000, 1,    slModRate,  lblModRate);
+        addRow(cl, "Room Size",   slRoomSize, lblRoomSize);
+        addRow(cl, "Density %",   slDensity,  lblDensity);
+        addRow(cl, "Mod Depth %", slModDepth, lblModDepth);
+        addRow(cl, "Mod Rate %",  slModRate,  lblModRate);
+
+        cl->addWidget(makeLabel("Early Reflections", 11, false, "#aaa"));
+        makeRow(0, 2000, 1, slERDelay, lblERDelay);
+        makeRow(0, 1000, 1, slERLevel, lblERLevel);
+        addRow(cl, "ER Delay ms", slERDelay, lblERDelay);
+        addRow(cl, "ER Level %",  slERLevel, lblERLevel);
+
+        cl->addWidget(makeLabel("Late Tail", 11, false, "#aaa"));
+        makeRow(0, 1000, 1, slLateLevel, lblLateLevel);
+        addRow(cl, "Late Reverb %", slLateLevel, lblLateLevel);
+
+        cl->addWidget(makeLabel("Spectral Shaping", 11, false, "#aaa"));
+        makeRow(0,   1000,  1,  slHfDamp,   lblHfDamp);
+        makeRow(0,   1000,  1,  slLfDamp,   lblLfDamp);
+        makeRow(20,  20000, 5,  slLowCut,   lblLowCut);
+        makeRow(500, 12000, 50, sliderTone, lblToneVal);
+        addRow(cl, "HF Damping %",    slHfDamp,   lblHfDamp);
+        addRow(cl, "LF Damping %",    slLfDamp,   lblLfDamp);
+        addRow(cl, "Low Cut Hz",      slLowCut,   lblLowCut);
+        addRow(cl, "Tone / High Cut", sliderTone, lblToneVal);
+
+        cl->addWidget(makeLabel("Stereo & Mix", 11, false, "#aaa"));
+        makeRow(0, 2000, 1, slRevWidth, lblRevWidth);
+        makeRow(0, 1000, 1, slWetLevel, lblWetLevel);
+        makeRow(0, 1000, 1, slDryLevel, lblDryLevel);
+        addRow(cl, "Stereo Width %", slRevWidth, lblRevWidth);
+        addRow(cl, "Wet Level %",    slWetLevel, lblWetLevel);
+        addRow(cl, "Dry Level %",    slDryLevel, lblDryLevel);
+
+        vlay->addWidget(sectionAdvancedReverb);
+    }
 
     vlay->addStretch();
     scroll->setWidget(container);
@@ -164,8 +221,27 @@ void AdvancedTab::connectAll() {
     bindSlider(slLvRL,  lblLvRL,  " %", 0, [this](float v){ m_settings.speakerLevelRL  = v; });
     bindSlider(slLvRR,  lblLvRR,  " %", 0, [this](float v){ m_settings.speakerLevelRR  = v; });
 
-    // Advanced Reverb Engine wiring now lives in LiveTab (see connectSignals
-    // there) alongside the rest of the redesigned Reverb section.
+    // ── Advanced Reverb Engine (mirrors LiveTab's copy) ─────────────────────
+    connect(toggleReverbEngine, &ToggleSwitch::toggled, this, [this](bool on){
+        m_settings.reverbEngineOn = on; emitSettings();
+    });
+    bindSlider(sliderDecay,    lblDecayVal,    " s",  1, [this](float v){ m_settings.reverbDecay    = v; });
+    bindSlider(sliderPredelay, lblPredelayVal, " ms", 0, [this](float v){ m_settings.reverbPredelay = v; });
+    bindSlider(sliderDiffuse,  lblDiffuseVal,  " %",  0, [this](float v){ m_settings.reverbDiffuse  = v; });
+    bindSlider(sliderTone,     lblToneVal,     " Hz", 0, [this](float v){ m_settings.reverbToneHz   = v; });
+    bindSlider(slRoomSize,  lblRoomSize,  "",    2, [this](float v){ m_settings.reverbRoomSize            = v; });
+    bindSlider(slDensity,   lblDensity,   " %",  0, [this](float v){ m_settings.reverbDensity              = v; });
+    bindSlider(slModDepth,  lblModDepth,  " %",  0, [this](float v){ m_settings.reverbModulationDepth      = v; });
+    bindSlider(slModRate,   lblModRate,   " %",  0, [this](float v){ m_settings.reverbModulationRate       = v; });
+    bindSlider(slERDelay,   lblERDelay,   " ms", 0, [this](float v){ m_settings.reverbEarlyReflectionDelay = v; });
+    bindSlider(slERLevel,   lblERLevel,   " %",  0, [this](float v){ m_settings.reverbEarlyReflectionLevel = v; });
+    bindSlider(slLateLevel, lblLateLevel, " %",  0, [this](float v){ m_settings.reverbLateReverbLevel      = v; });
+    bindSlider(slHfDamp,    lblHfDamp,    " %",  0, [this](float v){ m_settings.reverbHfDamping            = v; });
+    bindSlider(slLfDamp,    lblLfDamp,    " %",  0, [this](float v){ m_settings.reverbLfDamping            = v; });
+    bindSlider(slLowCut,    lblLowCut,    " Hz", 0, [this](float v){ m_settings.reverbLowCut               = v; });
+    bindSlider(slRevWidth,  lblRevWidth,  " %",  0, [this](float v){ m_settings.reverbStereoWidth          = v; });
+    bindSlider(slWetLevel,  lblWetLevel,  " %",  0, [this](float v){ m_settings.reverbWetLevel             = v; });
+    bindSlider(slDryLevel,  lblDryLevel,  " %",  0, [this](float v){ m_settings.reverbDryLevel             = v; });
 }
 
 void AdvancedTab::refreshFromSettings(const AppSettings& s) {
@@ -206,7 +282,28 @@ void AdvancedTab::refreshFromSettings(const AppSettings& s) {
     slLvRL ->setValueF(s.speakerLevelRL);  lblLvRL ->setText(QString::number((int)s.speakerLevelRL)  +" %");
     slLvRR ->setValueF(s.speakerLevelRR);  lblLvRR ->setText(QString::number((int)s.speakerLevelRR)  +" %");
 
-    // Advanced Reverb Engine sync now happens in LiveTab::refreshFromSettings.
+    // Advanced Reverb Engine — mirrors LiveTab's copy field-for-field.
+    toggleReverbEngine->blockSignals(true);
+    toggleReverbEngine->setChecked(s.reverbEngineOn);
+    toggleReverbEngine->blockSignals(false);
+    sectionAdvancedReverb->setExpanded(s.reverbEngineOn, false);
+    sliderDecay   ->setValueF(s.reverbDecay);    lblDecayVal   ->setText(QString::number(s.reverbDecay,'f',1)+" s");
+    sliderPredelay->setValueF(s.reverbPredelay); lblPredelayVal->setText(QString::number((int)s.reverbPredelay)+" ms");
+    sliderDiffuse ->setValueF(s.reverbDiffuse);  lblDiffuseVal ->setText(QString::number((int)s.reverbDiffuse)+" %");
+    sliderTone    ->setValueF(s.reverbToneHz);   lblToneVal    ->setText(QString::number((int)s.reverbToneHz)+" Hz");
+    slRoomSize ->setValueF(s.reverbRoomSize);            lblRoomSize ->setText(QString::number(s.reverbRoomSize,'f',2));
+    slDensity  ->setValueF(s.reverbDensity);             lblDensity  ->setText(QString::number((int)s.reverbDensity)+" %");
+    slModDepth ->setValueF(s.reverbModulationDepth);     lblModDepth ->setText(QString::number((int)s.reverbModulationDepth)+" %");
+    slModRate  ->setValueF(s.reverbModulationRate);      lblModRate  ->setText(QString::number((int)s.reverbModulationRate)+" %");
+    slERDelay  ->setValueF(s.reverbEarlyReflectionDelay);lblERDelay  ->setText(QString::number((int)s.reverbEarlyReflectionDelay)+" ms");
+    slERLevel  ->setValueF(s.reverbEarlyReflectionLevel);lblERLevel  ->setText(QString::number((int)s.reverbEarlyReflectionLevel)+" %");
+    slLateLevel->setValueF(s.reverbLateReverbLevel);     lblLateLevel->setText(QString::number((int)s.reverbLateReverbLevel)+" %");
+    slHfDamp   ->setValueF(s.reverbHfDamping);           lblHfDamp   ->setText(QString::number((int)s.reverbHfDamping)+" %");
+    slLfDamp   ->setValueF(s.reverbLfDamping);           lblLfDamp   ->setText(QString::number((int)s.reverbLfDamping)+" %");
+    slLowCut   ->setValueF(s.reverbLowCut);              lblLowCut   ->setText(QString::number((int)s.reverbLowCut)+" Hz");
+    slRevWidth ->setValueF(s.reverbStereoWidth);         lblRevWidth ->setText(QString::number((int)s.reverbStereoWidth)+" %");
+    slWetLevel ->setValueF(s.reverbWetLevel);            lblWetLevel ->setText(QString::number((int)s.reverbWetLevel)+" %");
+    slDryLevel ->setValueF(s.reverbDryLevel);            lblDryLevel ->setText(QString::number((int)s.reverbDryLevel)+" %");
 }
 
 void AdvancedTab::emitSettings() {
