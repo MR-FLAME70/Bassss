@@ -13,9 +13,13 @@
 //   2. Speaker Configuration: mode select + Virtual Speaker Shifter
 //      (Front width, Rear width, Center distance, Rear distance,
 //       Sub distance, per-channel levels FL/FR/C/Sub/RL/RR)
-//   3. Advanced Reverb Engine: Room Size, ER Delay, Early Reflections,
-//      Late Reverb, HF/LF Damping, Stereo Width, Modulation depth/rate,
-//      Low Cut, High Cut, Density, Wet Level, Dry Level
+//
+// The "Advanced Reverb Engine" section (Room Size, ER Delay, Early
+// Reflections, Late Reverb, HF/LF Damping, Stereo Width, Modulation
+// depth/rate, Low Cut, High Cut, Density, Wet Level, Dry Level) now lives
+// inside the redesigned Reverb section on the Live tab (see LiveTab), next
+// to Reverb Enable / Effect Amount / Preset / Mix, instead of a separate
+// tab — the whole Reverb feature is one cohesive, collapsible unit.
 // ──────────────────────────────────────────────────────────────────────────────
 class AdvancedTab : public QWidget {
     Q_OBJECT
@@ -35,7 +39,6 @@ private:
     // aliases sectionXxx->toggle() so the rest of the wiring code is unchanged.
     CollapsibleSection* sectionAcoustic;
     CollapsibleSection* sectionSpeaker;
-    CollapsibleSection* sectionReverb;
 
     // Acoustic engine
     ToggleSwitch* toggleAcoustic;
@@ -49,29 +52,6 @@ private:
     QLabel*       lblFrontW, *lblRearW, *lblCenterDist, *lblRearDist, *lblSubDist;
     DarkSlider*   slLvFL, *slLvFR, *slLvC, *slLvSub, *slLvRL, *slLvRR;
     QLabel*       lblLvFL, *lblLvFR, *lblLvC, *lblLvSub, *lblLvRL, *lblLvRR;
-
-    // Advanced Reverb Engine — all 14 controls
-    ToggleSwitch* toggleReverbEngine;
-    // FDN / room
-    DarkSlider*   slRoomSize;   QLabel* lblRoomSize;
-    DarkSlider*   slDensity;    QLabel* lblDensity;
-    DarkSlider*   slModDepth;   QLabel* lblModDepth;
-    DarkSlider*   slModRate;    QLabel* lblModRate;
-    // Early reflections
-    DarkSlider*   slERDelay;    QLabel* lblERDelay;   // ← was missing
-    DarkSlider*   slERLevel;    QLabel* lblERLevel;
-    // Late tail
-    DarkSlider*   slLateLevel;  QLabel* lblLateLevel;
-    // Spectral shaping
-    DarkSlider*   slHfDamp;     QLabel* lblHfDamp;
-    DarkSlider*   slLfDamp;     QLabel* lblLfDamp;
-    DarkSlider*   slHighCut;    QLabel* lblHighCut;
-    DarkSlider*   slLowCut;     QLabel* lblLowCut;
-    // Stereo
-    DarkSlider*   slRevWidth;   QLabel* lblRevWidth;
-    // Mix
-    DarkSlider*   slWetLevel;   QLabel* lblWetLevel;
-    DarkSlider*   slDryLevel;   QLabel* lblDryLevel;
 
     void buildUI();
     void connectAll();

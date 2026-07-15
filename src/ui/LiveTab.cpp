@@ -8,7 +8,28 @@
 #include <QPushButton>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QAbstractItemView>
 #include <cmath>
+
+// Row layout shared by every slider inside the Reverb section (top-level
+// controls and everything inside the Advanced Reverb Engine collapsible
+// body): fixed label/value column widths keep every row aligned into a
+// clean two-column grid instead of the previous stacked label/slider/value.
+void LiveTab::addRow(QLayout* lay, const char* name, DarkSlider* sl, QLabel* vl) {
+    auto* row = new QHBoxLayout();
+    row->setSpacing(10);
+    auto* nm = new QLabel(name);
+    nm->setStyleSheet("color:#aaa; font-size:11px;");
+    nm->setFixedWidth(96);
+    vl->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:500;");
+    vl->setFixedWidth(64);
+    vl->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    sl->setFixedHeight(22);
+    row->addWidget(nm);
+    row->addWidget(sl, 1);
+    row->addWidget(vl);
+    static_cast<QVBoxLayout*>(lay)->addLayout(row);
+}
 
 // EAX Preset definitions — transcribed field-for-field from the original
 // extension's EAX_PRESETS table (popup.js), after applying its fallback-fill
@@ -132,78 +153,163 @@ QWidget* LiveTab::buildBassColumn() {
 QWidget* LiveTab::buildReverbColumn() {
     auto* col = new DarkCard();
     auto* lay = new QVBoxLayout(col);
-    lay->setSpacing(8);
+    lay->setSpacing(12);
+    lay->setContentsMargins(16, 16, 16, 16);
 
-    // Header
+    // Convenience factory, mirrors AdvancedTab's makeRow: new slider + value
+    // label wired to the passed-in pointers, with a consistent control height.
+    auto makeRow = [&](double lo, double hi, double step,
+                       DarkSlider*& sl, QLabel*& lbl, const QString& initial) {
+        sl  = new DarkSlider(Qt::Horizontal);
+        sl->setRangeF(lo, hi, step);
+        sl->setFixedHeight(22);
+        lbl = new QLabel(initial);
+    };
+
+    // ── 1. Reverb Enable ─────────────────────────────────────────────────────
     auto* header = new QHBoxLayout();
-    auto* title  = makeLabel("Reverb", 13, true, "#ffffff");
+    auto* title  = makeLabel("Reverb", 14, true, "#ffffff");
     toggleReverb = new ToggleSwitch();
     header->addWidget(title);
     header->addStretch();
     header->addWidget(toggleReverb);
     lay->addLayout(header);
 
-    // Preset
+    // ── 2. Effect Amount — master intensity for the whole reverb. 0% = fully
+    //    dry, 100% = full preset intensity. Scales the wet bus only; it never
+    //    touches the preset's own internal parameters (room size, decay,
+    //    etc.), and updates in real time via the audio thread's smoothed gain
+    //    ramp (see AudioProcessor::processStereo), so there is no zipper
+    //    noise while dragging. Backed by the existing AppSettings::reverbAmount.
+    lay->addWidget(makeDimLabel("Effect Amount"));
+    makeRow(0, 100, 1, sliderReverbAmount, lblReverbAmountVal, "100 %");
+    {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(10);
+        lblReverbAmountVal->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:600;");
+        lblReverbAmountVal->setFixedWidth(48);
+        lblReverbAmountVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        row->addWidget(sliderReverbAmount, 1);
+        row->addWidget(lblReverbAmountVal);
+        lay->addLayout(row);
+    }
+
+    // ── 3. Preset — larger, legible, dark-theme dropdown. ───────────────────
     lay->addWidget(makeDimLabel("Preset"));
     comboPreset = new QComboBox();
+    comboPreset->setMinimumHeight(36);
     comboPreset->setStyleSheet(R"(
         QComboBox {
             background: #171717; color: #f2f2f2; border: 1px solid #2a2a2a;
-            border-radius: 6px; padding: 5px 9px; font-size: 12px;
+            border-radius: 8px; padding: 0 14px; font-size: 13px;
+            min-height: 36px;
         }
-        QComboBox:hover { border: 1px solid #3a3a3a; }
-        QComboBox::drop-down { border: none; }
+        QComboBox:hover  { background: #1c1c1c; border: 1px solid #3a3a3a; }
+        QComboBox:focus  { border: 1px solid #4a4a4a; }
+        QComboBox::drop-down {
+            subcontrol-origin: padding; subcontrol-position: top right;
+            width: 30px; border-left: 1px solid #2a2a2a;
+        }
         QComboBox QAbstractItemView {
-            background: #1a1a1a; color: #fff; border: 1px solid #333;
-            selection-background-color: #333333; outline: none;
+            background: #1a1a1a; color: #f2f2f2; border: 1px solid #333;
+            border-radius: 6px; padding: 4px;
+            selection-background-color: #2e2e2e; selection-color: #ffffff;
+            outline: none; font-size: 13px;
+        }
+        QComboBox QAbstractItemView::item {
+            min-height: 28px; padding: 2px 10px; border-radius: 4px;
         }
     )");
     for (int i = 0; EAX_PRESETS[i].name; ++i)
         comboPreset->addItem(EAX_PRESETS[i].name);
+    // Let the popup grow to fit the longest preset name (e.g.
+    // "hauntedcavernv2") in full, even though the closed control stays at
+    // the column's width — names are never truncated once the list is open.
+    comboPreset->view()->setMinimumWidth(comboPreset->minimumSizeHint().width() + 60);
+    comboPreset->setMaxVisibleItems(14);
     lay->addWidget(comboPreset);
 
-    // Mix — popup.html: reverbMix min=0 max=1000 step=1 (wide "overdrive"
-    // headroom past 100%; ReverbEngine/outer bus clamp to 0-100 internally).
+    // ── 4. Mix — popup.html: reverbMix min=0 max=1000 step=1 (wide
+    //    "overdrive" headroom past 100%; ReverbEngine/outer bus clamp to
+    //    0-100 internally).
     lay->addWidget(makeDimLabel("Mix (%)"));
-    sliderReverbMix = new DarkSlider(Qt::Horizontal);
-    sliderReverbMix->setRangeF(0, 1000, 1);
-    lblReverbMixVal = makeLabel("74 %", 11, false, "#d0d0d0");
-    lay->addWidget(sliderReverbMix);
-    lay->addWidget(lblReverbMixVal);
+    makeRow(0, 1000, 1, sliderReverbMix, lblReverbMixVal, "74 %");
+    {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(10);
+        lblReverbMixVal->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:600;");
+        lblReverbMixVal->setFixedWidth(48);
+        lblReverbMixVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        row->addWidget(sliderReverbMix, 1);
+        row->addWidget(lblReverbMixVal);
+        lay->addLayout(row);
+    }
 
-    // Decay — popup.html: reverbDecay min=0.1 max=250 step=0.01
-    lay->addWidget(makeDimLabel("Decay (s)"));
-    sliderDecay = new DarkSlider(Qt::Horizontal);
-    sliderDecay->setRangeF(0.1f, 250.f, 0.01f);
-    lblDecayVal = makeLabel("9.0 s", 11, false, "#d0d0d0");
-    lay->addWidget(sliderDecay);
-    lay->addWidget(lblDecayVal);
+    // ── 5. Advanced Reverb Engine — collapsible. Collapsed by default: only
+    //    the title (and its own Enable switch) are visible. Expanding reveals
+    //    every remaining reverb parameter with the same smooth animated
+    //    expand/collapse CollapsibleSection already uses elsewhere in the
+    //    app, so this reads as one consistent interaction language.
+    lay->addSpacing(4);
+    sectionAdvancedReverb = new CollapsibleSection("Advanced Reverb Engine");
+    toggleReverbEngine    = sectionAdvancedReverb->toggle();
 
-    // Pre-delay — popup.html: reverbPredelay min=0 max=1500 step=1
-    lay->addWidget(makeDimLabel("Pre-delay (ms)"));
-    sliderPredelay = new DarkSlider(Qt::Horizontal);
-    sliderPredelay->setRangeF(0, 1500, 1);
-    lblPredelayVal = makeLabel("38 ms", 11, false, "#d0d0d0");
-    lay->addWidget(sliderPredelay);
-    lay->addWidget(lblPredelayVal);
+    auto* cl = new QVBoxLayout(sectionAdvancedReverb->content());
+    cl->setContentsMargins(0, 0, 0, 0);
+    cl->setSpacing(10);
 
-    // Diffusion — popup.html: reverbDiffuse min=0 max=900 step=1
-    lay->addWidget(makeDimLabel("Diffusion (%)"));
-    sliderDiffuse = new DarkSlider(Qt::Horizontal);
-    sliderDiffuse->setRangeF(0, 900, 1);
-    lblDiffuseVal = makeLabel("78 %", 11, false, "#d0d0d0");
-    lay->addWidget(sliderDiffuse);
-    lay->addWidget(lblDiffuseVal);
+    cl->addWidget(makeDimLabel("Envelope"));
+    makeRow(0.1f, 250.f, 0.01f, sliderDecay,    lblDecayVal,    "9.0 s");
+    makeRow(0,    1500,  1,     sliderPredelay, lblPredelayVal, "38 ms");
+    makeRow(0,    900,   1,     sliderDiffuse,  lblDiffuseVal,  "78 %");
+    addRow(cl, "Decay (s)",       sliderDecay,    lblDecayVal);
+    addRow(cl, "Pre-delay (ms)",  sliderPredelay, lblPredelayVal);
+    addRow(cl, "Diffusion (%)",   sliderDiffuse,  lblDiffuseVal);
 
-    // Tone Hz — popup.html: reverbFrequency min=500 max=12000 step=50.
-    // Same underlying field as the Advanced tab's "High Cut" slider
-    // (reverbToneHz) — the two are alternate views of one control.
-    lay->addWidget(makeDimLabel("Tone (Hz)"));
-    sliderTone = new DarkSlider(Qt::Horizontal);
-    sliderTone->setRangeF(500, 12000, 50);
-    lblToneVal = makeLabel("3600 Hz", 11, false, "#d0d0d0");
-    lay->addWidget(sliderTone);
-    lay->addWidget(lblToneVal);
+    cl->addSpacing(4);
+    cl->addWidget(makeDimLabel("Room Character"));
+    makeRow(0.25, 30,   0.05, slRoomSize, lblRoomSize, "2.60");
+    makeRow(0,    1000, 1,    slDensity,  lblDensity,  "78 %");
+    makeRow(0,    1000, 1,    slModDepth, lblModDepth, "55 %");
+    makeRow(0,    1000, 1,    slModRate,  lblModRate,  "30 %");
+    addRow(cl, "Room Size",     slRoomSize, lblRoomSize);
+    addRow(cl, "Density %",     slDensity,  lblDensity);
+    addRow(cl, "Mod Depth %",   slModDepth, lblModDepth);
+    addRow(cl, "Mod Rate %",    slModRate,  lblModRate);
+
+    cl->addSpacing(4);
+    cl->addWidget(makeDimLabel("Early Reflections"));
+    makeRow(0, 2000, 1, slERDelay, lblERDelay, "0 ms");
+    makeRow(0, 1000, 1, slERLevel, lblERLevel, "38 %");
+    addRow(cl, "ER Delay ms",   slERDelay,  lblERDelay);
+    addRow(cl, "ER Level %",    slERLevel,  lblERLevel);
+
+    cl->addSpacing(4);
+    cl->addWidget(makeDimLabel("Late Tail"));
+    makeRow(0, 1000, 1, slLateLevel, lblLateLevel, "100 %");
+    addRow(cl, "Late Reverb %", slLateLevel, lblLateLevel);
+
+    cl->addSpacing(4);
+    cl->addWidget(makeDimLabel("Spectral Shaping"));
+    makeRow(0,   1000,   1,   slHfDamp,  lblHfDamp,  "35 %");
+    makeRow(0,   1000,   1,   slLfDamp,  lblLfDamp,  "15 %");
+    makeRow(20,  20000,  5,   slLowCut,  lblLowCut,  "90 Hz");
+    makeRow(500, 12000,  50,  sliderTone,lblToneVal, "3600 Hz");
+    addRow(cl, "HF Damping %",     slHfDamp,   lblHfDamp);
+    addRow(cl, "LF Damping %",     slLfDamp,   lblLfDamp);
+    addRow(cl, "Low Cut Hz",       slLowCut,   lblLowCut);
+    addRow(cl, "Tone / High Cut",  sliderTone, lblToneVal);
+
+    cl->addSpacing(4);
+    cl->addWidget(makeDimLabel("Stereo & Mix"));
+    makeRow(0, 2000, 1, slRevWidth, lblRevWidth, "165 %");
+    makeRow(0, 1000, 1, slWetLevel, lblWetLevel, "100 %");
+    makeRow(0, 1000, 1, slDryLevel, lblDryLevel, "0 %");
+    addRow(cl, "Stereo Width %", slRevWidth, lblRevWidth);
+    addRow(cl, "Wet Level %",    slWetLevel, lblWetLevel);
+    addRow(cl, "Dry Level %",    slDryLevel, lblDryLevel);
+
+    lay->addWidget(sectionAdvancedReverb);
 
     lay->addStretch();
     return col;
@@ -284,9 +390,27 @@ void LiveTab::connectSignals() {
         emitSettings();
     });
 
-    // Reverb
+    // ── Reverb ───────────────────────────────────────────────────────────────
+    // Generic slider binder (matches AdvancedTab's bindSlider): captures the
+    // setter, updates its value label, and re-emits settings — used for every
+    // slider inside the Advanced Reverb Engine section below.
+    auto bindSlider = [&](DarkSlider* sl, QLabel* lbl,
+                          const QString& suffix, int decimals, auto setter) {
+        connect(sl, &QSlider::valueChanged, this, [=]{
+            float v = (float)sl->valueF();
+            setter(v);
+            lbl->setText(QString::number((double)v, 'f', decimals) + suffix);
+            emitSettings();
+        });
+    };
+
     connect(toggleReverb, &ToggleSwitch::toggled, this, [this](bool on){
         m_settings.reverbOn = on; emitSettings();
+    });
+    connect(sliderReverbAmount, &QSlider::valueChanged, this, [this]{
+        m_settings.reverbAmount = (float)sliderReverbAmount->valueF();
+        lblReverbAmountVal->setText(QString::number((int)m_settings.reverbAmount)+" %");
+        emitSettings();
     });
     connect(comboPreset, &QComboBox::currentTextChanged,
             this, &LiveTab::onPresetChanged);
@@ -295,26 +419,28 @@ void LiveTab::connectSignals() {
         lblReverbMixVal->setText(QString::number((int)m_settings.reverbMix)+" %");
         emitSettings();
     });
-    connect(sliderDecay, &QSlider::valueChanged, this, [this]{
-        m_settings.reverbDecay = (float)sliderDecay->valueF();
-        lblDecayVal->setText(QString::number(m_settings.reverbDecay,'f',1)+" s");
-        emitSettings();
+
+    // ── Advanced Reverb Engine (collapsible) ────────────────────────────────
+    connect(toggleReverbEngine, &ToggleSwitch::toggled, this, [this](bool on){
+        m_settings.reverbEngineOn = on; emitSettings();
     });
-    connect(sliderPredelay, &QSlider::valueChanged, this, [this]{
-        m_settings.reverbPredelay = (float)sliderPredelay->valueF();
-        lblPredelayVal->setText(QString::number((int)m_settings.reverbPredelay)+" ms");
-        emitSettings();
-    });
-    connect(sliderDiffuse, &QSlider::valueChanged, this, [this]{
-        m_settings.reverbDiffuse = (float)sliderDiffuse->valueF();
-        lblDiffuseVal->setText(QString::number((int)m_settings.reverbDiffuse)+" %");
-        emitSettings();
-    });
-    connect(sliderTone, &QSlider::valueChanged, this, [this]{
-        m_settings.reverbToneHz = (float)sliderTone->valueF();
-        lblToneVal->setText(QString::number((int)m_settings.reverbToneHz)+" Hz");
-        emitSettings();
-    });
+    bindSlider(sliderDecay,    lblDecayVal,    " s",  1, [this](float v){ m_settings.reverbDecay    = v; });
+    bindSlider(sliderPredelay, lblPredelayVal, " ms", 0, [this](float v){ m_settings.reverbPredelay = v; });
+    bindSlider(sliderDiffuse,  lblDiffuseVal,  " %",  0, [this](float v){ m_settings.reverbDiffuse  = v; });
+    bindSlider(sliderTone,     lblToneVal,     " Hz", 0, [this](float v){ m_settings.reverbToneHz   = v; });
+    bindSlider(slRoomSize,  lblRoomSize,  "",    2, [this](float v){ m_settings.reverbRoomSize            = v; });
+    bindSlider(slDensity,   lblDensity,   " %",  0, [this](float v){ m_settings.reverbDensity              = v; });
+    bindSlider(slModDepth,  lblModDepth,  " %",  0, [this](float v){ m_settings.reverbModulationDepth      = v; });
+    bindSlider(slModRate,   lblModRate,   " %",  0, [this](float v){ m_settings.reverbModulationRate       = v; });
+    bindSlider(slERDelay,   lblERDelay,   " ms", 0, [this](float v){ m_settings.reverbEarlyReflectionDelay = v; });
+    bindSlider(slERLevel,   lblERLevel,   " %",  0, [this](float v){ m_settings.reverbEarlyReflectionLevel = v; });
+    bindSlider(slLateLevel, lblLateLevel, " %",  0, [this](float v){ m_settings.reverbLateReverbLevel      = v; });
+    bindSlider(slHfDamp,    lblHfDamp,    " %",  0, [this](float v){ m_settings.reverbHfDamping            = v; });
+    bindSlider(slLfDamp,    lblLfDamp,    " %",  0, [this](float v){ m_settings.reverbLfDamping            = v; });
+    bindSlider(slLowCut,    lblLowCut,    " Hz", 0, [this](float v){ m_settings.reverbLowCut               = v; });
+    bindSlider(slRevWidth,  lblRevWidth,  " %",  0, [this](float v){ m_settings.reverbStereoWidth          = v; });
+    bindSlider(slWetLevel,  lblWetLevel,  " %",  0, [this](float v){ m_settings.reverbWetLevel             = v; });
+    bindSlider(slDryLevel,  lblDryLevel,  " %",  0, [this](float v){ m_settings.reverbDryLevel             = v; });
 
     // Output
     connect(toggleSpectrum, &ToggleSwitch::toggled, this, [this](bool on){
@@ -355,6 +481,8 @@ void LiveTab::onPresetChanged(const QString& name) {
             m_settings.reverbLowCut              = pr.lowCut;
             m_settings.reverbWetLevel            = pr.wetLevel;
             m_settings.reverbDryLevel            = pr.dryLevel;
+            // Effect Amount is a separate master-intensity control, not part
+            // of the preset itself — selecting a preset must not reset it.
             refreshFromSettings(m_settings);
             emitSettings();
             break;
@@ -423,13 +551,34 @@ void LiveTab::refreshFromSettings(const AppSettings& s) {
     sliderVolume->setValueF(s.volume);
 
     toggleReverb->setChecked(s.reverbOn);
+    sliderReverbAmount->setValueF(s.reverbAmount);
     int pIdx = comboPreset->findText(s.reverbPreset);
     if (pIdx >= 0) comboPreset->setCurrentIndex(pIdx);
+    comboPreset->setToolTip(s.reverbPreset);
     sliderReverbMix->setValueF(s.reverbMix);
+
+    // Advanced Reverb Engine
+    toggleReverbEngine->blockSignals(true);
+    toggleReverbEngine->setChecked(s.reverbEngineOn);
+    toggleReverbEngine->blockSignals(false);
+    sectionAdvancedReverb->setExpanded(s.reverbEngineOn, false);
     sliderDecay->setValueF(s.reverbDecay);
     sliderPredelay->setValueF(s.reverbPredelay);
     sliderDiffuse->setValueF(s.reverbDiffuse);
     sliderTone->setValueF(s.reverbToneHz);
+    slRoomSize ->setValueF(s.reverbRoomSize);
+    slDensity  ->setValueF(s.reverbDensity);
+    slModDepth ->setValueF(s.reverbModulationDepth);
+    slModRate  ->setValueF(s.reverbModulationRate);
+    slERDelay  ->setValueF(s.reverbEarlyReflectionDelay);
+    slERLevel  ->setValueF(s.reverbEarlyReflectionLevel);
+    slLateLevel->setValueF(s.reverbLateReverbLevel);
+    slHfDamp   ->setValueF(s.reverbHfDamping);
+    slLfDamp   ->setValueF(s.reverbLfDamping);
+    slLowCut   ->setValueF(s.reverbLowCut);
+    slRevWidth ->setValueF(s.reverbStereoWidth);
+    slWetLevel ->setValueF(s.reverbWetLevel);
+    slDryLevel ->setValueF(s.reverbDryLevel);
 
     toggleSpectrum->setChecked(s.spectrumOn);
     spectrumW->setVisible(s.spectrumOn);
@@ -442,11 +591,27 @@ void LiveTab::updateLabels() {
     lblFreqVal->setText(QString::number((int)m_settings.frequency) + " Hz");
     lblGainVal->setText(QString::number(m_settings.gain,'f',1) + " dB");
     lblVolVal->setText(QString::number((int)m_settings.volume) + " %");
+
+    lblReverbAmountVal->setText(QString::number((int)m_settings.reverbAmount) + " %");
     lblReverbMixVal->setText(QString::number((int)m_settings.reverbMix) + " %");
+
     lblDecayVal->setText(QString::number(m_settings.reverbDecay,'f',1) + " s");
     lblPredelayVal->setText(QString::number((int)m_settings.reverbPredelay) + " ms");
     lblDiffuseVal->setText(QString::number((int)m_settings.reverbDiffuse) + " %");
     lblToneVal->setText(QString::number((int)m_settings.reverbToneHz) + " Hz");
+    lblRoomSize ->setText(QString::number(m_settings.reverbRoomSize,'f',2));
+    lblDensity  ->setText(QString::number((int)m_settings.reverbDensity) + " %");
+    lblModDepth ->setText(QString::number((int)m_settings.reverbModulationDepth) + " %");
+    lblModRate  ->setText(QString::number((int)m_settings.reverbModulationRate) + " %");
+    lblERDelay  ->setText(QString::number((int)m_settings.reverbEarlyReflectionDelay) + " ms");
+    lblERLevel  ->setText(QString::number((int)m_settings.reverbEarlyReflectionLevel) + " %");
+    lblLateLevel->setText(QString::number((int)m_settings.reverbLateReverbLevel) + " %");
+    lblHfDamp   ->setText(QString::number((int)m_settings.reverbHfDamping) + " %");
+    lblLfDamp   ->setText(QString::number((int)m_settings.reverbLfDamping) + " %");
+    lblLowCut   ->setText(QString::number((int)m_settings.reverbLowCut) + " Hz");
+    lblRevWidth ->setText(QString::number((int)m_settings.reverbStereoWidth) + " %");
+    lblWetLevel ->setText(QString::number((int)m_settings.reverbWetLevel) + " %");
+    lblDryLevel ->setText(QString::number((int)m_settings.reverbDryLevel) + " %");
 }
 
 void LiveTab::emitSettings() {

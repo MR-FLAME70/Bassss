@@ -9,12 +9,16 @@
 #include "../settings.h"
 
 class AudioProcessor;
+class QLayout;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // LiveTab — the first tab in the main window.
 // Matches the Live Tab Audio grid from popup.html:
-//   Left column:  Bass Boost controls + Volume
-//   Center column: Reverb on/off + presets + advanced reverb settings
+//   Left column:   Bass Boost controls + Volume
+//   Center column: Reverb — one cohesive, professional-plugin-style section:
+//                    Reverb Enable → Effect Amount → Preset → Mix →
+//                    collapsible "Advanced Reverb Engine" (every other
+//                    reverb parameter, hidden until expanded).
 //   Right column:  Output controls (record, VU meter, spectrum, bypass)
 // ──────────────────────────────────────────────────────────────────────────────
 class LiveTab : public QWidget {
@@ -47,19 +51,34 @@ private:
     QLabel*      lblGainVal;
     QLabel*      lblVolVal;
 
-    // Reverb column
+    // ── Reverb column — always-visible controls ─────────────────────────────
     ToggleSwitch* toggleReverb;
+    DarkSlider*   sliderReverbAmount;   QLabel* lblReverbAmountVal;
     QComboBox*    comboPreset;
-    DarkSlider*   sliderReverbMix;
-    DarkSlider*   sliderDecay;
-    DarkSlider*   sliderPredelay;
-    DarkSlider*   sliderDiffuse;
-    DarkSlider*   sliderTone;
-    QLabel*       lblReverbMixVal;
-    QLabel*       lblDecayVal;
-    QLabel*       lblPredelayVal;
-    QLabel*       lblDiffuseVal;
-    QLabel*       lblToneVal;
+    DarkSlider*   sliderReverbMix;      QLabel* lblReverbMixVal;
+
+    // ── Advanced Reverb Engine — collapsible, hidden until expanded ─────────
+    CollapsibleSection* sectionAdvancedReverb;
+    ToggleSwitch*        toggleReverbEngine; // == sectionAdvancedReverb->toggle()
+
+    DarkSlider* sliderDecay;     QLabel* lblDecayVal;
+    DarkSlider* sliderPredelay;  QLabel* lblPredelayVal;
+    DarkSlider* sliderDiffuse;   QLabel* lblDiffuseVal;
+    DarkSlider* sliderTone;      QLabel* lblToneVal;   // shared Tone / High Cut control
+
+    DarkSlider* slRoomSize;   QLabel* lblRoomSize;
+    DarkSlider* slDensity;    QLabel* lblDensity;
+    DarkSlider* slModDepth;   QLabel* lblModDepth;
+    DarkSlider* slModRate;    QLabel* lblModRate;
+    DarkSlider* slERDelay;    QLabel* lblERDelay;
+    DarkSlider* slERLevel;    QLabel* lblERLevel;
+    DarkSlider* slLateLevel;  QLabel* lblLateLevel;
+    DarkSlider* slHfDamp;     QLabel* lblHfDamp;
+    DarkSlider* slLfDamp;     QLabel* lblLfDamp;
+    DarkSlider* slLowCut;     QLabel* lblLowCut;
+    DarkSlider* slRevWidth;   QLabel* lblRevWidth;
+    DarkSlider* slWetLevel;   QLabel* lblWetLevel;
+    DarkSlider* slDryLevel;   QLabel* lblDryLevel;
 
     // Output column
     VUMeter*      vuMeter;
@@ -84,4 +103,8 @@ private:
     QWidget* buildBassColumn();
     QWidget* buildReverbColumn();
     QWidget* buildOutputColumn();
+
+    // Helper: add a {label, slider, valueLabel} row with consistent
+    // alignment/height, matching AdvancedTab's row layout.
+    static void addRow(QLayout* lay, const char* name, DarkSlider* sl, QLabel* vl);
 };

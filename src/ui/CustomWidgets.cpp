@@ -128,18 +128,22 @@ DarkSlider::DarkSlider(Qt::Orientation o, QWidget* parent) : QSlider(o, parent) 
     // than the surrounding card so it reads clearly against the background,
     // the filled portion uses a brighter silver so progress is unambiguous
     // at a glance, and the handle stays crisp white with a dark rim.
+    // Thin, slightly-lit borders (vs. the previous near-black #050505) so
+    // each fader reads as a distinct bordered control against the card
+    // background — the FabFilter/iZotope "recessed strip" look — without
+    // adding visual weight.
     setStyleSheet(R"(
         QSlider::groove:horizontal {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                         stop:0 #0a0a0a, stop:1 #1a1a1a);
             height: 5px; border-radius: 2px;
-            border: 1px solid #050505;
+            border: 1px solid #2a2a2a;
         }
         QSlider::groove:vertical {
             background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
                         stop:0 #0a0a0a, stop:1 #1a1a1a);
             width: 5px; border-radius: 2px;
-            border: 1px solid #050505;
+            border: 1px solid #2a2a2a;
         }
         QSlider::handle:horizontal {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
@@ -158,18 +162,18 @@ DarkSlider::DarkSlider(Qt::Orientation o, QWidget* parent) : QSlider(o, parent) 
         QSlider::sub-page:horizontal {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                         stop:0 #cfcfcf, stop:1 #9a9a9a);
-            border: 1px solid #050505; border-radius: 2px;
+            border: 1px solid #2a2a2a; border-radius: 2px;
         }
         QSlider::add-page:vertical {
             background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
                         stop:0 #cfcfcf, stop:1 #9a9a9a);
-            border: 1px solid #050505; border-radius: 2px;
+            border: 1px solid #2a2a2a; border-radius: 2px;
         }
         QSlider::add-page:horizontal {
-            background: #101010; border: 1px solid #050505; border-radius: 2px;
+            background: #101010; border: 1px solid #2a2a2a; border-radius: 2px;
         }
         QSlider::sub-page:vertical {
-            background: #101010; border: 1px solid #050505; border-radius: 2px;
+            background: #101010; border: 1px solid #2a2a2a; border-radius: 2px;
         }
     )");
     setRange(0, 10000);
