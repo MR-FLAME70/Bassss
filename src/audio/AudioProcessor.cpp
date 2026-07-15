@@ -303,8 +303,122 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
             ep.aeReflLevel        = s.aeReflLevel    / 100.f;
             ep.aeReflDelay        = s.aeReflDelay;   // ms, no scaling
         }
-        // When aeOn=false the Params struct keeps its neutral defaults above,
-        // so only the basic signal path runs with no observable change.
+        // ── Echo Algorithm character ──────────────────────────────────────────
+        // When the Advanced Echo Engine is off (aeOn=false), apply the selected
+        // algorithm's DSP fingerprint. This enables the advanced signal path
+        // transparently — the user sees a simple Algorithm selector but gets
+        // rich, hardware-modelled coloration without touching any sliders.
+        // When s.aeOn is true, the user's own advanced settings take precedence
+        // and algorithm shaping is suppressed so there's no interference.
+        if (!s.aeOn) {
+            const QString& alg = s.echoAlgorithm;
+            // Any algorithm other than "clean" (and the implicit neutral state)
+            // enables the advanced path with algorithm-specific defaults.
+            if (alg == "digital") {
+                // Crisp, transparent. Enable advanced path but keep it neutral
+                // — no saturation, no modulation, flat tone. True to the signal.
+                ep.aeOn = true;
+                // all params remain at neutral defaults; just gates the path
+
+            } else if (alg == "analog") {
+                // Warm odd-harmonic saturation, gentle HF limiting on feedback,
+                // whisper of slow wow to simulate VCO drift.
+                ep.aeOn          = true;
+                ep.aeAnalogSat   = 0.20f;
+                ep.aeWarmth      = 0.15f;
+                ep.aeFbHighCut   = 8000.f;
+                ep.aeWow         = 0.05f;
+                ep.aeModDepth    = 0.15f;
+                ep.aeModRate     = 0.6f;
+
+            } else if (alg == "tape") {
+                // Even-harmonic tape saturation, gentle treble rolloff per repeat,
+                // classic wow & flutter, stochastic speed drift.
+                ep.aeOn          = true;
+                ep.aeTapeSat     = 0.35f;
+                ep.aeAnalogSat   = 0.10f;
+                ep.aeWarmth      = 0.20f;
+                ep.aeFbHighCut   = 6000.f;
+                ep.aeToneTreble  = -2.f;
+                ep.aeWow         = 0.15f;
+                ep.aeFlutter     = 0.08f;
+                ep.aeModDepth    = 0.30f;
+                ep.aeModRate     = 0.8f;
+                ep.aeRandomDrift = 0.05f;
+
+            } else if (alg == "bucketbrigade") {
+                // BBD-style: band-limited, slightly gritty, clock-noise drift.
+                ep.aeOn          = true;
+                ep.aeAnalogSat   = 0.25f;
+                ep.aeWarmth      = 0.10f;
+                ep.aeFbHighCut   = 7000.f;
+                ep.aeFbLowCut    = 80.f;
+                ep.aeRandomDrift = 0.15f;
+                ep.aeWow         = 0.08f;
+                ep.aeFlutter     = 0.05f;
+                ep.aeModDepth    = 0.20f;
+                ep.aeModRate     = 1.2f;
+
+            } else if (alg == "vintage") {
+                // Heavy aged-hardware character: saturated, dark, wobbly.
+                ep.aeOn          = true;
+                ep.aeTapeSat     = 0.50f;
+                ep.aeAnalogSat   = 0.15f;
+                ep.aeWarmth      = 0.25f;
+                ep.aeFbHighCut   = 4000.f;
+                ep.aeFbDamping   = 0.15f;
+                ep.aeToneTreble  = -3.f;
+                ep.aeWow         = 0.20f;
+                ep.aeFlutter     = 0.10f;
+                ep.aeModDepth    = 0.35f;
+                ep.aeModRate     = 0.5f;
+                ep.aeRandomDrift = 0.25f;
+
+            } else if (alg == "warm") {
+                // Low-end emphasis, silky top-end roll, tape warmth.
+                ep.aeOn          = true;
+                ep.aeTapeSat     = 0.20f;
+                ep.aeWarmth      = 0.30f;
+                ep.aeToneBass    = 2.f;
+                ep.aeToneTreble  = -2.f;
+                ep.aeFbHighCut   = 9000.f;
+
+            } else if (alg == "dark") {
+                // Heavily damped, bass-forward, shadows and depth.
+                ep.aeOn          = true;
+                ep.aeTapeSat     = 0.30f;
+                ep.aeWarmth      = 0.20f;
+                ep.aeFbHighCut   = 3000.f;
+                ep.aeToneHighCut = 8000.f;
+                ep.aeToneBass    = 3.f;
+                ep.aeToneTreble  = -4.f;
+                ep.aeFbDamping   = 0.20f;
+
+            } else if (alg == "bright") {
+                // Articulate, airy, presence-forward, slight even-order sheen.
+                ep.aeOn           = true;
+                ep.aeAnalogSat    = 0.10f;
+                ep.aeToneTreble   = 3.f;
+                ep.aeTonePresence = 2.f;
+                ep.aeToneBrightness = 2.f;
+
+            } else if (alg == "lofi") {
+                // Severe bandwidth limiting, heavy drift, maximum grit.
+                ep.aeOn           = true;
+                ep.aeAnalogSat    = 0.60f;
+                ep.aeFbHighCut    = 4000.f;
+                ep.aeToneHighCut  = 6000.f;
+                ep.aeFbLowCut     = 120.f;
+                ep.aeToneBass     = -1.f;
+                ep.aeRandomDrift  = 0.40f;
+                ep.aeFlutter      = 0.20f;
+                ep.aeWow          = 0.10f;
+                ep.aeModDepth     = 0.40f;
+                ep.aeModRate      = 1.5f;
+                ep.aeSoftClip     = true;
+            }
+            // "clean" and any unrecognised id: leave aeOn=false, pure basic path.
+        }
 
         echoEngine.setParams(ep);
     }

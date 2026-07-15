@@ -10,21 +10,76 @@
 
 static const char* EQ_FREQS[10] = {"31","62","125","250","500","1k","2k","4k","8k","16k"};
 
-// ── Echo Engine presets ──────────────────────────────────────────────────────
-// name → { delayMs, feedback%, mix%, tone%, pingPong% }
-struct EchoPreset { const char* name; float delay, fb, mix, tone, pingPong; };
-static const EchoPreset ECHO_PRESETS[] = {
-    { "slapback",     110.f,  8.f, 25.f, 20.f,   0.f },
-    { "vocaldoubler",  35.f,  5.f, 20.f, 10.f,   0.f },
-    { "pingpong",     280.f, 42.f, 40.f, 25.f, 100.f },
-    { "tapeecho",     350.f, 55.f, 38.f, 60.f,  15.f },
-    { "rhythmic8th",  250.f, 48.f, 42.f, 30.f,  60.f },
-    { "dubdelay",     430.f, 72.f, 50.f, 70.f,  20.f },
-    { "ambientwash",  620.f, 68.f, 45.f, 45.f,  35.f },
-    { "stadium",      500.f, 60.f, 55.f, 50.f,  80.f },
+// ── Echo Algorithm definitions ────────────────────────────────────────────────
+// Algorithms configure the sonic character of the echo engine. Applied by
+// AudioProcessor when the Advanced Echo Engine section is off, giving every
+// basic preset a unique sonic fingerprint without requiring the user to touch
+// the Advanced controls.
+struct EchoAlgorithmDef {
+    const char* id;
+    const char* label;
 };
+static const EchoAlgorithmDef ECHO_ALGORITHMS[] = {
+    { "digital",      "Digital"       },
+    { "analog",       "Analog"        },
+    { "tape",         "Tape"          },
+    { "bucketbrigade","Bucket Brigade"},
+    { "vintage",      "Vintage"       },
+    { "clean",        "Clean"         },
+    { "warm",         "Warm"          },
+    { "dark",         "Dark"          },
+    { "bright",       "Bright"        },
+    { "lofi",         "Lo-Fi"         },
+};
+
+// ── Echo Engine presets ──────────────────────────────────────────────────────
+// name → { id, label, algorithm, delayMs, feedback%, mix%, tone%, pingPong% }
+struct EchoPreset {
+    const char* name;       // internal save key
+    const char* label;      // display name
+    const char* algorithm;  // default algorithm id for this preset
+    float delay, fb, mix, tone, pingPong;
+};
+static const EchoPreset ECHO_PRESETS[] = {
+    // ── Legacy presets (kept for settings compatibility) ────────────────────
+    { "slapback",       "Slapback",              "analog",      110.f,  8.f, 25.f, 20.f,   0.f },
+    { "vocaldoubler",   "Vocal Doubler",          "clean",        35.f,  5.f, 20.f, 10.f,   0.f },
+    { "pingpong",       "Ping Pong",              "digital",     280.f, 42.f, 40.f, 25.f, 100.f },
+    { "tapeecho",       "Tape Echo",              "tape",        350.f, 55.f, 38.f, 60.f,  15.f },
+    { "rhythmic8th",    "Rhythmic 8th",           "digital",     250.f, 48.f, 42.f, 30.f,  60.f },
+    { "dubdelay",       "Dub Echo",               "analog",      430.f, 72.f, 50.f, 70.f,  20.f },
+    { "ambientwash",    "Ambient Echo",           "warm",        620.f, 68.f, 45.f, 45.f,  35.f },
+    { "stadium",        "Stadium",                "digital",     500.f, 60.f, 55.f, 50.f,  80.f },
+    // ── New factory presets ──────────────────────────────────────────────────
+    { "slapecho",       "Slap Echo",              "digital",     120.f, 15.f, 30.f, 40.f,   0.f },
+    { "rockabillyslap", "Rockabilly Slap",        "bright",       95.f, 12.f, 28.f, 25.f,   5.f },
+    { "vocalecho",      "Vocal Echo",             "warm",        220.f, 30.f, 35.f, 45.f,  10.f },
+    { "roomecho",       "Room Echo",              "digital",     180.f, 25.f, 32.f, 35.f,  15.f },
+    { "hallecho",       "Hall Echo",              "warm",        400.f, 50.f, 42.f, 55.f,  25.f },
+    { "digitaldelay",   "Digital Delay",          "digital",     300.f, 40.f, 38.f, 30.f,   0.f },
+    { "analogdelay",    "Analog Delay",           "analog",      350.f, 55.f, 38.f, 60.f,  15.f },
+    { "pingpongdelay",  "Ping Pong",              "digital",     280.f, 42.f, 40.f, 25.f, 100.f },
+    { "stereoecho",     "Stereo Echo",            "digital",     300.f, 40.f, 38.f, 30.f,  50.f },
+    { "wideecho",       "Wide Echo",              "warm",        350.f, 45.f, 40.f, 40.f,  80.f },
+    { "monoecho",       "Mono Echo",              "clean",       300.f, 40.f, 38.f, 30.f,   0.f },
+    { "valleyecho",     "Valley Echo",            "vintage",     500.f, 55.f, 45.f, 65.f,  30.f },
+    { "canyonecho",     "Canyon Echo",            "vintage",     800.f, 65.f, 48.f, 70.f,  20.f },
+    { "caveecho",       "Cave Echo",              "dark",        600.f, 60.f, 45.f, 75.f,  35.f },
+    { "hauntedcavernsb","Haunted Cavern (SB0490)","dark",        700.f, 70.f, 50.f, 80.f,  40.f },
+    { "hauntedcavernreg","Haunted Cavern (Registry)","dark",     650.f, 68.f, 48.f, 78.f,  38.f },
+    { "arena",          "Arena",                  "digital",     600.f, 65.f, 58.f, 55.f,  85.f },
+    { "dubecho",        "Dub Echo",               "analog",      430.f, 72.f, 50.f, 70.f,  20.f },
+    { "longdelay",      "Long Delay",             "clean",       800.f, 35.f, 35.f, 30.f,   0.f },
+    { "shortdelay",     "Short Delay",            "clean",       150.f, 20.f, 28.f, 25.f,   0.f },
+    { "ambientecho",    "Ambient Echo",           "warm",        620.f, 68.f, 45.f, 45.f,  35.f },
+    { "reversestyle",   "Reverse Style",          "vintage",     400.f, 50.f, 42.f, 55.f,  20.f },
+    { "custom",         "Custom",                 "clean",       350.f, 55.f, 38.f, 60.f,  15.f },
+};
+static const int ECHO_PRESETS_COUNT = (int)(sizeof(ECHO_PRESETS)/sizeof(ECHO_PRESETS[0]));
+
 static const EchoPreset* findEchoPreset(const QString& name) {
-    for (auto& p : ECHO_PRESETS) if (name == p.name) return &p;
+    for (int i = 0; i < ECHO_PRESETS_COUNT; ++i)
+        if (name == ECHO_PRESETS[i].name) return &ECHO_PRESETS[i];
     return &ECHO_PRESETS[3]; // tapeecho fallback
 }
 
@@ -240,21 +295,30 @@ void AdvancedAudioTab::buildUI() {
         hdr->addWidget(toggleEchoEnable);
         cl->addLayout(hdr);
 
-        comboEchoPreset = new QComboBox();
-        comboEchoPreset->setStyleSheet(
+        static const char* COMBO_SS =
             "QComboBox { background:#171717; color:#f2f2f2; border:1px solid #2a2a2a;"
             "border-radius:6px; padding:5px 9px; font-size:11px; }"
             "QComboBox:hover { border:1px solid #3a3a3a; }"
             "QComboBox QAbstractItemView { background:#1a1a1a; color:#fff; "
-            "border:1px solid #333; selection-background-color:#333333; outline:none; }");
-        static const std::pair<const char*, const char*> ECHO_PRESET_LABELS[] = {
-            {"slapback","Slapback"}, {"vocaldoubler","Vocal Doubler"},
-            {"pingpong","Ping-Pong"}, {"tapeecho","Tape Echo"},
-            {"rhythmic8th","Rhythmic 8th"}, {"dubdelay","Dub Delay"},
-            {"ambientwash","Ambient Wash"}, {"stadium","Stadium"},
-        };
-        for (auto& pl : ECHO_PRESET_LABELS)
-            comboEchoPreset->addItem(pl.second, QVariant(QString(pl.first)));
+            "border:1px solid #333; selection-background-color:#333333; outline:none; }";
+
+        // Algorithm selector
+        {
+            auto* algRow = new QHBoxLayout();
+            algRow->addWidget(makeDimLabel("Algorithm"), 1);
+            comboEchoAlgorithm = new QComboBox();
+            comboEchoAlgorithm->setStyleSheet(COMBO_SS);
+            for (auto& a : ECHO_ALGORITHMS)
+                comboEchoAlgorithm->addItem(a.label, QVariant(QString(a.id)));
+            algRow->addWidget(comboEchoAlgorithm, 3);
+            cl->addLayout(algRow);
+        }
+
+        comboEchoPreset = new QComboBox();
+        comboEchoPreset->setStyleSheet(COMBO_SS);
+        for (int i = 0; i < ECHO_PRESETS_COUNT; ++i)
+            comboEchoPreset->addItem(ECHO_PRESETS[i].label,
+                                     QVariant(QString(ECHO_PRESETS[i].name)));
         cl->addWidget(comboEchoPreset);
 
         echoBody = new QWidget();
@@ -401,6 +465,10 @@ void AdvancedAudioTab::connectAll() {
         updateEchoStatus();
         emitSettings();
     });
+    if (comboEchoAlgorithm) {
+        connect(comboEchoAlgorithm, &QComboBox::currentTextChanged, this,
+            [this](const QString&){ onEchoAlgorithmChanged(comboEchoAlgorithm->currentData().toString()); });
+    }
     connect(comboEchoPreset, &QComboBox::currentTextChanged, this,
             [this](const QString&){ onEchoPresetChanged(comboEchoPreset->currentData().toString()); });
     connect(sliderEchoDelay, &QSlider::valueChanged, this, [this]{
@@ -452,6 +520,23 @@ void AdvancedAudioTab::onEchoPresetChanged(const QString& id) {
     lblEchoTone->setText(QString::number((int)p->tone)+" %");
     lblEchoMix->setText(QString::number((int)p->mix)+" %");
     lblEchoPingPong->setText(QString::number((int)p->pingPong)+" %");
+
+    // Also apply the preset's default algorithm (without triggering another emitSettings)
+    if (comboEchoAlgorithm) {
+        int algIdx = comboEchoAlgorithm->findData(QVariant(QString(p->algorithm)));
+        if (algIdx >= 0) {
+            comboEchoAlgorithm->blockSignals(true);
+            comboEchoAlgorithm->setCurrentIndex(algIdx);
+            comboEchoAlgorithm->blockSignals(false);
+        }
+        m_settings.echoAlgorithm = QString(p->algorithm);
+    }
+    emitSettings();
+}
+
+void AdvancedAudioTab::onEchoAlgorithmChanged(const QString& id) {
+    if (id.isEmpty()) return;
+    m_settings.echoAlgorithm = id;
     emitSettings();
 }
 
@@ -520,6 +605,10 @@ void AdvancedAudioTab::refreshFromSettings(const AppSettings& s) {
 
     toggleEchoEnable->setChecked(s.echoOn);
     toggleEchoBypass->setChecked(s.echoBypass);
+    if (comboEchoAlgorithm) {
+        int algIdx = comboEchoAlgorithm->findData(s.echoAlgorithm);
+        if (algIdx >= 0) comboEchoAlgorithm->setCurrentIndex(algIdx);
+    }
     int echoIdx = comboEchoPreset->findData(s.echoPreset);
     if (echoIdx >= 0) comboEchoPreset->setCurrentIndex(echoIdx);
     sliderEchoDelay->setValueF(s.echoDelayMs);

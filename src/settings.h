@@ -142,6 +142,14 @@ struct AppSettings {
     float echoDryLevel   = 100.f;  // % dry (original) signal level
     float echoOutputGain = 100.f;  // % post-mix output gain (100 = unity)
 
+    // ── Echo Algorithm ────────────────────────────────────────────────────────
+    // Selects the sonic character of the echo engine. Applied automatically
+    // via the DSP layer (no Advanced Echo Engine toggle required). When the
+    // Advanced Echo Engine is also enabled, user AE settings take precedence.
+    // Values: "digital" | "analog" | "tape" | "bucketbrigade" | "vintage" |
+    //         "clean" | "warm" | "dark" | "bright" | "lofi"
+    QString echoAlgorithm = "clean";
+
     // ── Advanced Echo Engine ─────────────────────────────────────────────────
     // All stored in natural UI units (ms, dB, %, Hz, bool). The AudioProcessor
     // converts to normalised EchoEngine::Params values before calling setParams.

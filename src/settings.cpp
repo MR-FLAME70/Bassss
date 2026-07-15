@@ -117,6 +117,7 @@ void AppSettings::load() {
     LOAD_F(echoWetLevel, 100.f);
     LOAD_F(echoDryLevel, 100.f);
     LOAD_F(echoOutputGain, 100.f);
+    LOAD_S(echoAlgorithm, "clean");
 
     // ── Advanced Echo Engine ─────────────────────────────────────────────────
     LOAD_B(aeOn, false);
@@ -205,6 +206,7 @@ void AppSettings::save() const {
     SAVE(echoTone); SAVE(echoPingPong);
     SAVE(echoNumEchoes); SAVE(echoAmount); SAVE(echoWetLevel);
     SAVE(echoDryLevel); SAVE(echoOutputGain);
+    SAVE(echoAlgorithm);
     // Advanced Echo Engine
     SAVE(aeOn);
     SAVE(aeLeftDelayMs); SAVE(aeRightDelayMs); SAVE(aeStereoOffset); SAVE(aeStereoWidthD);

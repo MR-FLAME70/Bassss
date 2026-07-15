@@ -23,6 +23,7 @@ signals:
 
 private slots:
     void onEchoPresetChanged(const QString& name);
+    void onEchoAlgorithmChanged(const QString& id);
 
 private:
     AppSettings m_settings;
@@ -67,6 +68,7 @@ private:
     ToggleSwitch* toggleEchoBypass;
     QLabel*       lblEchoStatus;
     QComboBox*    comboEchoPreset;
+    QComboBox*    comboEchoAlgorithm = nullptr;
     DarkSlider*   sliderEchoDelay, *sliderEchoFeedback, *sliderEchoMix,
                  *sliderEchoTone, *sliderEchoPingPong;
     QLabel*       lblEchoDelay, *lblEchoFeedback, *lblEchoMix,
