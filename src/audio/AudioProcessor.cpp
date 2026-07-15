@@ -755,10 +755,22 @@ void AudioProcessor::writeWavHeaderPlaceholder(std::ofstream& f) {
 }
 
 void AudioProcessor::patchWavHeader(std::ofstream& f, uint64_t frames) {
+    // Header layout written by writeWavHeaderPlaceholder():
+    //   "RIFF"(4) + chunkSize(4) + "WAVE"(4)                = 12
+    //   "fmt "(4) + 18(4) + fmt-data(18, incl. cbSize)       = 26   -> ends at 38
+    //   "data"(4) + dataSize(4)                              = 8    -> ends at 46
+    // So dataSize lives at byte offset 42, not 40 — the old hardcoded 40
+    // clobbered the last 2 bytes of the "data" tag itself, corrupting every
+    // recorded file's header (readers would fail to find a valid "data"
+    // chunk and either reject the file or mis-locate the sample data,
+    // producing garbled/"electric"-sounding playback).
+    // Likewise chunkSize = fileSize - 8 = 46 + dataSize - 8 = 38 + dataSize,
+    // not the PCM-standard 36 + dataSize (which only holds for a 16-byte
+    // fmt chunk with no cbSize field).
     uint32_t dataSize  = (uint32_t)(frames * 2 * sizeof(float));
-    uint32_t chunkSize = 36 + dataSize;
+    uint32_t chunkSize = 38 + dataSize;
     f.seekp(4, std::ios::beg);
     f.write(reinterpret_cast<const char*>(&chunkSize), 4);
-    f.seekp(40, std::ios::beg);
+    f.seekp(42, std::ios::beg);
     f.write(reinterpret_cast<const char*>(&dataSize), 4);
 }
