@@ -20,6 +20,10 @@ class AudioProcessor;
 // The output side uses a PortAudio output-only stream that reads from a
 // StereoRingBuffer filled by the WASAPI capture thread.
 //
+// "Both" mode: opens a WASAPI loopback AND a WASAPI mic simultaneously,
+// each into its own ring buffer.  The outCallback pops from both rings
+// and sums the frames before passing them to the DSP chain.
+//
 // On non-Windows, both input and output fall back to a standard PortAudio
 // full-duplex stream.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -46,17 +50,22 @@ public:
     static std::vector<OutputDeviceInfo> enumerateOutputDevices();
 
     // ── Open / close ─────────────────────────────────────────────────────────
-    // inputDeviceId  — stable device ID string (empty = system default)
-    // inputType      — Loopback or Microphone
+    // inputDeviceId  — stable device ID string for the primary source
+    // inputType      — Loopback or Microphone (primary source type)
     // outputDeviceId — output device id string (empty = default output)
     // sampleRate     — advisory; actual rate reported after open
     // bufferSize     — PortAudio frames per buffer
+    // micDeviceId    — non-empty only in "both" mode: secondary mic device ID.
+    //                  When set, the loopback (inputDeviceId) is opened as
+    //                  primary and this mic is opened simultaneously; frames
+    //                  from both are summed before DSP.
     bool open(const std::string& inputDeviceId,
               AudioDeviceType   inputType,
               const std::string& outputDeviceId,
               double sampleRate,
               int    bufferSize,
-              QString& errorOut);
+              QString& errorOut,
+              const std::string& micDeviceId = "");
     void close();
 
     bool   isOpen()           const { return m_open.load(); }
@@ -72,8 +81,15 @@ private:
 
 #ifdef _WIN32
     // Windows path: WASAPI capture + PortAudio output-only
-    WASAPICapture*   m_wasapi   = nullptr;
+    // Primary source (loopback or mic-only).
+    WASAPICapture*   m_wasapi    = nullptr;
     StereoRingBuffer m_ring;
+
+    // Secondary mic capture — only allocated/active in "both" mode.
+    WASAPICapture*   m_wasapiMic = nullptr;
+    StereoRingBuffer m_ring2;
+    std::atomic<bool> m_mixMode{false};  // true when both loopback+mic active
+
     PaStream*        m_outStream = nullptr;
 
     bool openOutputOnly(const std::string& outputDeviceId,

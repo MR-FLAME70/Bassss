@@ -39,11 +39,12 @@ static void enableDenormalFlushToZero() {
 //   [PortAudio high-priority audio thread]
 //       StereoRingBuffer → pop raw frame → AudioProcessor::processStereo → output
 //
+// "Both" mode adds a second WASAPI capture for the microphone in parallel:
+//   [WASAPI CaptureWorker — loopback]  → m_ring
+//   [WASAPI CaptureWorker — mic]       → m_ring2
+//   [PortAudio audio thread]  pops from both rings, sums frames, runs DSP.
+//
 // The DSP MUST run in the PortAudio callback, not in the CaptureWorker.
-// Moving it to the audio thread:
-//   • Eliminates missed WASAPI events (the burst handler completes instantly)
-//   • Uses the OS-scheduled real-time audio thread for all DSP
-//   • Keeps PortAudio latency well-defined (bufferSize / sampleRate seconds)
 // ──────────────────────────────────────────────────────────────────────────────
 
 AudioCapture::AudioCapture(AudioProcessor* proc, QObject* parent)
@@ -111,12 +112,15 @@ bool AudioCapture::open(const std::string& inputDeviceId,
                         AudioDeviceType   inputType,
                         const std::string& outputDeviceId,
                         double sampleRate, int bufferSize,
-                        QString& errorOut) {
+                        QString& errorOut,
+                        const std::string& micDeviceId) {
     if (m_open.load()) close();
     if (sampleRate <= 0.0) sampleRate = 48000.0;
 
 #ifdef _WIN32
     // ── Windows: WASAPI input (raw frames only) + PortAudio output (DSP here) ─
+
+    // Open primary source (loopback or mic-only).
     if (!m_wasapi->open(inputDeviceId, inputType, sampleRate, errorOut)) {
         if (!errorOut.isEmpty())
             emit errorOccurred(errorOut);
@@ -125,9 +129,35 @@ bool AudioCapture::open(const std::string& inputDeviceId,
     m_sampleRate = m_wasapi->actualSampleRate();
     m_proc->setSampleRate(m_sampleRate);
 
+    // ── "Both" mode: additionally open the microphone as a second source ──────
+    // micDeviceId is non-empty only when audioSourceMode == "both".
+    // We open the mic at the same sample rate the loopback negotiated.
+    // A failure here is treated as non-fatal — we fall back to loopback-only
+    // and emit a warning so the user knows the mic didn't open.
+    m_mixMode.store(false);
+    if (!micDeviceId.empty()) {
+        // Allocate the secondary capture object on demand (only when needed).
+        if (!m_wasapiMic) {
+            m_wasapiMic = new WASAPICapture(m_ring2, this);
+            connect(m_wasapiMic, &WASAPICapture::errorOccurred,
+                    this,        &AudioCapture::errorOccurred);
+        }
+        QString micErr;
+        if (m_wasapiMic->open(micDeviceId, AudioDeviceType::Microphone,
+                               m_sampleRate, micErr)) {
+            m_mixMode.store(true);
+        } else {
+            // Non-fatal: warn but continue with loopback-only.
+            emit errorOccurred(
+                QString("Mic could not be opened (loopback-only fallback): %1").arg(micErr));
+        }
+    }
+
     if (!openOutputOnly(outputDeviceId, m_sampleRate, bufferSize, errorOut)) {
         emit errorOccurred(errorOut);
         m_wasapi->close();
+        if (m_wasapiMic && m_mixMode.load()) m_wasapiMic->close();
+        m_mixMode.store(false);
         return false;
     }
 
@@ -190,6 +220,9 @@ bool AudioCapture::open(const std::string& inputDeviceId,
 void AudioCapture::close() {
 #ifdef _WIN32
     if (m_wasapi) m_wasapi->close();
+    // Close secondary mic capture if it was active in "both" mode.
+    if (m_wasapiMic) m_wasapiMic->close();
+    m_mixMode.store(false);
     if (m_outStream) {
         Pa_StopStream(m_outStream);
         Pa_CloseStream(m_outStream);
@@ -249,16 +282,16 @@ bool AudioCapture::openOutputOnly(const std::string& outputDeviceId,
 // ── Windows output callback — runs on the PortAudio real-time audio thread ────
 //
 // The full DSP chain runs HERE.  The CaptureWorker pushes raw (unprocessed)
-// float frames into the ring buffer; we pop them, run processStereo(), and
-// write the result to the PortAudio output buffer.
+// float frames into the ring buffer(s); we pop them, optionally mix the
+// secondary mic ring (m_ring2) when m_mixMode is true, run processStereo(),
+// and write the result to the PortAudio output buffer.
 //
-// Why here and not in the CaptureWorker?
-//   WASAPI delivers data in bursts (~480 frames every 10 ms at 48 kHz).
-//   Running expensive DSP (FDN reverb + EQ + …) inside the burst handler
-//   causes the thread to miss the next WASAPI event, which leads to dropped
-//   capture frames and audible stutter.  The PortAudio audio thread fires at
-//   a fixed period (bufferSize / sampleRate seconds) under the real-time
-//   OS scheduler — the correct home for sample-accurate DSP.
+// "Both" mode mixing strategy:
+//   We pop one frame from each ring and sum them directly.  The existing
+//   compressor / limiter in the DSP chain handles any transient peaks that
+//   result from additive mixing; using a 0.5× pre-attenuator instead would
+//   make the loopback or mic feel "quieter" than when used alone, which is
+//   confusing.  Users can adjust the master Volume slider if needed.
 int AudioCapture::outCallback(const void*, void* outputBuffer,
                                unsigned long frameCount,
                                const PaStreamCallbackTimeInfo*,
@@ -279,10 +312,22 @@ int AudioCapture::outCallback(const void*, void* outputBuffer,
     // clock). This is what keeps end-to-end latency bounded to ~10-40ms
     // instead of silently growing and staying wherever it happened to drift.
     self->m_ring.trimToTargetLatency();
+    const bool mixMode = self->m_mixMode.load();
+    if (mixMode) self->m_ring2.trimToTargetLatency();
 
     for (unsigned long i = 0; i < frameCount; ++i) {
         float l = 0.f, r = 0.f;
-        self->m_ring.pop(l, r);          // raw input (or 0 on underrun)
+        self->m_ring.pop(l, r);          // primary: loopback (or mic if mic-only)
+
+        if (mixMode) {
+            // "Both" mode: sum mic frames into the loopback frames.
+            // The DSP limiter downstream prevents clipping from the additive mix.
+            float ml = 0.f, mr = 0.f;
+            self->m_ring2.pop(ml, mr);   // secondary: microphone
+            l += ml;
+            r += mr;
+        }
+
         self->m_proc->processStereo(l, r); // full DSP chain
         out[i*2]   = l;
         out[i*2+1] = r;

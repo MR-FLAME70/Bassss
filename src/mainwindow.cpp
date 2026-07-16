@@ -26,13 +26,9 @@
 
 // ── Data roles for device combo boxes ─────────────────────────────────────────
 // UserRole+0 = device ID string (QString)
-// UserRole+1 = audio source mode string: "playback" | "microphone" (source combo only)
-static const int kRoleDeviceId    = Qt::UserRole + 0;
-static const int kRoleSourceMode  = Qt::UserRole + 1;
-
-// Stack page indices in m_deviceStack
-static const int kStackPageMic      = 0;
-static const int kStackPagePlayback = 1;
+// UserRole+1 = audio source mode string (source combo only)
+static const int kRoleDeviceId   = Qt::UserRole + 0;
+static const int kRoleSourceMode = Qt::UserRole + 1;
 
 // ──────────────────────────────────────────────────────────────────────────────
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -40,9 +36,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     setFixedSize(kWindowWidth, kWindowHeight);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
-    // Frameless windows are square by default; a translucent surface lets us
-    // paint our own anti-aliased rounded-rect background in paintEvent() and
-    // leave the true corners fully transparent instead of hard-edged.
     setAttribute(Qt::WA_TranslucentBackground, true);
 
     m_proc    = new AudioProcessor();
@@ -52,9 +45,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             this,      &MainWindow::onAudioError);
 
     applyDarkTheme();
-    // Override the global QWidget{background-color:#000000} rule for just
-    // this top-level window so translucency actually shows; the rounded
-    // fill itself is painted in paintEvent().
     setStyleSheet("background: transparent;");
     buildUI();
 
@@ -66,27 +56,9 @@ MainWindow::~MainWindow() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Startup reveal: fade-in + scale-up from 97% → 100%, synced with the splash
-// screen's fade-out (see main.cpp).
-//
-// windowOpacity is a native, compositor-level alpha (DWM on Windows) rather
-// than a QGraphicsOpacityEffect layered over the widget tree — cheaper, and
-// GPU-composited the same way any other translucent top-level window is.
-//
-// The "scale" is a geometry animation (grow the window rect around its
-// center) rather than a true affine transform of rendered content: this is
-// a real, fixed-size, pixel-laid-out window (custom title bar, meters, pill
-// tabs), so genuinely scaling its live content would mean rendering into an
-// offscreen texture — overkill for a ~3% size delta over ~320ms. setFixedSize()
-// is relaxed for the duration of the animation and restored to the exact
-// original size the moment it finishes.
+// Startup reveal animation (fade-in + scale-up 97%→100%)
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::playIntroAnimation() {
-    // The window has never been shown yet, so geometry() doesn't reflect a
-    // real on-screen position — center it explicitly on whichever screen has
-    // the cursor (same rule the splash screen uses), so the reveal lands
-    // exactly where the splash was, instead of wherever the platform's
-    // default placement for a new frameless top-level happens to be.
     QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
     if (!screen) screen = QGuiApplication::primaryScreen();
     QRect finalGeo(0, 0, kWindowWidth, kWindowHeight);
@@ -95,7 +67,6 @@ void MainWindow::playIntroAnimation() {
         finalGeo.moveCenter(avail.center());
     }
 
-    // Compute a slightly smaller rect, same center, as the animation start.
     const qreal kStartScale = 0.97;
     const int startW = qRound(finalGeo.width()  * kStartScale);
     const int startH = qRound(finalGeo.height() * kStartScale);
@@ -103,8 +74,6 @@ void MainWindow::playIntroAnimation() {
                           finalGeo.center().y() - startH / 2,
                           startW, startH);
 
-    // Relax the fixed-size constraint so QPropertyAnimation can actually
-    // resize the window mid-animation; restored at the end.
     setMinimumSize(0, 0);
     setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
 
@@ -131,7 +100,6 @@ void MainWindow::playIntroAnimation() {
     group->addAnimation(scale);
 
     connect(group, &QParallelAnimationGroup::finished, this, [this]() {
-        // Lock back to the exact fixed size once the reveal is done.
         setFixedSize(kWindowWidth, kWindowHeight);
     });
 
@@ -189,8 +157,6 @@ void MainWindow::applyDarkTheme() {
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::buildUI() {
     auto* central = new QWidget();
-    // Transparent so MainWindow's own rounded-rect paint (behind this widget)
-    // shows through at the corners instead of a flat black rectangle.
     central->setStyleSheet("background: transparent;");
     setCentralWidget(central);
 
@@ -198,15 +164,8 @@ void MainWindow::buildUI() {
     root->setContentsMargins(0,0,0,0);
     root->setSpacing(0);
 
-    // 1. Custom title bar
     root->addWidget(buildTitleBar());
 
-    // 2. Tab bar — pill-shaped segmented control (custom-painted, animated).
-    // Left-aligned with natural (text-sized) tab widths, matching the
-    // reference: a solid white rounded pill on the active tab with black
-    // text, gray text with no background on inactive tabs, and the pill
-    // slides smoothly between tabs on selection with a soft hover fade on
-    // the others.
     m_tabBar = new PillTabBar();
     m_tabBar->addTab("🎵  LIVE TAB AUDIO");
     m_tabBar->addTab("⚙  ADVANCED");
@@ -214,7 +173,6 @@ void MainWindow::buildUI() {
     connect(m_tabBar, &PillTabBar::currentChanged, this, &MainWindow::onTabChanged);
     root->addWidget(m_tabBar);
 
-    // 3. Tab content (stacked)
     auto* stack = new QStackedWidget();
     m_liveTab      = new LiveTab(m_proc);
     m_advTab       = new AdvancedTab();
@@ -225,12 +183,10 @@ void MainWindow::buildUI() {
     m_stack = stack;
     root->addWidget(stack, 1);
 
-    // Wire settings-changed signals
     connect(m_liveTab,     &LiveTab::settingsChanged,         this, &MainWindow::onSettingsChanged);
     connect(m_advTab,      &AdvancedTab::settingsChanged,     this, &MainWindow::onSettingsChanged);
     connect(m_advAudioTab, &AdvancedAudioTab::settingsChanged,this, &MainWindow::onSettingsChanged);
 
-    // Populate device dropdowns and restore saved selection
     populateDeviceDropdowns();
 
     const auto& s = globalSettings();
@@ -245,8 +201,6 @@ void MainWindow::buildUI() {
 QWidget* MainWindow::buildTitleBar() {
     m_titleBar = new QWidget();
     m_titleBar->setFixedHeight(46);
-    // Round only the top two corners so they line up exactly with the
-    // window's own rounded corners painted behind it.
     m_titleBar->setStyleSheet(QString(
         "background: #0a0a0a; border-bottom: 1px solid #1a1a1a;"
         "border-top-left-radius: %1px; border-top-right-radius: %1px;"
@@ -254,7 +208,7 @@ QWidget* MainWindow::buildTitleBar() {
 
     auto* lay = new QHBoxLayout(m_titleBar);
     lay->setContentsMargins(12,0,8,0);
-    lay->setSpacing(6);
+    lay->setSpacing(5);
 
     // Logo
     QLabel* logo = new QLabel();
@@ -266,9 +220,8 @@ QWidget* MainWindow::buildTitleBar() {
     title->setStyleSheet("color:#ffffff; font-size:14px; font-weight:600; letter-spacing:1.5px;");
     lay->addWidget(title);
 
-    lay->addSpacing(10);
+    lay->addSpacing(8);
 
-    // Shared combo-box chrome, reused for source, device, and output combos.
     const QString comboStyle =
         "QComboBox { background:#131313; color:#ccc; border:1px solid #262626; border-radius:5px;"
         "padding:2px 8px; font-size:11px; }"
@@ -277,76 +230,100 @@ QWidget* MainWindow::buildTitleBar() {
         "QComboBox QAbstractItemView { background:#1a1a1a; color:#fff; border:1px solid #333;"
         "selection-background-color:#333333; font-size:11px; outline:none; }";
 
-    // ── Audio Source (Microphone / Playback Device) ────────────────────────────
-    // This is the master routing choice: it decides WHAT gets processed.
-    // Nothing is captured until the user picks one — the mic is never opened
-    // implicitly.
-    auto* srcGroup = new QWidget();
-    srcGroup->setStyleSheet("background:transparent;");
-    auto* srcLay = new QVBoxLayout(srcGroup);
-    srcLay->setContentsMargins(0,0,0,0);
-    srcLay->setSpacing(1);
+    // ── Audio Source ───────────────────────────────────────────────────────────
+    // Three modes:
+    //   0 — "microphone"  → only mic device shown
+    //   1 — "playback"    → only playback device shown
+    //   2 — "both"        → mic + playback devices both shown
+    {
+        auto* grp = new QWidget();
+        grp->setStyleSheet("background:transparent;");
+        auto* gl = new QVBoxLayout(grp);
+        gl->setContentsMargins(0,0,0,0);
+        gl->setSpacing(1);
 
-    auto* srcLabel = new QLabel("Audio Source");
-    srcLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
-    srcLay->addWidget(srcLabel);
+        auto* lbl = new QLabel("Audio Source");
+        lbl->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
+        gl->addWidget(lbl);
 
-    m_comboSource = new QComboBox();
-    m_comboSource->setFixedWidth(130);
-    m_comboSource->setFixedHeight(26);
-    m_comboSource->setStyleSheet(comboStyle);
-    m_comboSource->addItem("🎤 Microphone",      QVariant());
-    m_comboSource->setItemData(0, QString("microphone"), kRoleSourceMode);
-    m_comboSource->addItem("🔊 Playback Device", QVariant());
-    m_comboSource->setItemData(1, QString("playback"), kRoleSourceMode);
-    srcLay->addWidget(m_comboSource);
-    lay->addWidget(srcGroup);
+        m_comboSource = new QComboBox();
+        m_comboSource->setFixedWidth(138);
+        m_comboSource->setFixedHeight(26);
+        m_comboSource->setStyleSheet(comboStyle);
+        // Index 0: microphone only
+        m_comboSource->addItem("🎤 Microphone");
+        m_comboSource->setItemData(0, QString("microphone"), kRoleSourceMode);
+        // Index 1: loopback (playback) only
+        m_comboSource->addItem("🔊 Playback");
+        m_comboSource->setItemData(1, QString("playback"), kRoleSourceMode);
+        // Index 2: both mic + loopback mixed together
+        m_comboSource->addItem("🎤+🔊 Mic + Speaker");
+        m_comboSource->setItemData(2, QString("both"), kRoleSourceMode);
+        gl->addWidget(m_comboSource);
+        lay->addWidget(grp);
+    }
 
-    // ── Device selector (swaps between Mic list and Playback list) ────────────
-    auto* devGroup = new QWidget();
-    devGroup->setStyleSheet("background:transparent;");
-    auto* devLay = new QVBoxLayout(devGroup);
-    devLay->setContentsMargins(0,0,0,0);
-    devLay->setSpacing(1);
+    // ── Mic device group (visible in mic-only and "both" modes) ───────────────
+    {
+        m_micGroup = new QWidget();
+        m_micGroup->setStyleSheet("background:transparent;");
+        auto* gl = new QVBoxLayout(m_micGroup);
+        gl->setContentsMargins(0,0,0,0);
+        gl->setSpacing(1);
 
-    m_deviceGroupLabel = new QLabel("Playback Device");
-    m_deviceGroupLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
-    devLay->addWidget(m_deviceGroupLabel);
+        m_micGroupLabel = new QLabel("Microphone");
+        m_micGroupLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
+        gl->addWidget(m_micGroupLabel);
 
-    m_deviceStack = new QStackedWidget();
-    m_deviceStack->setFixedWidth(190);
-    m_deviceStack->setFixedHeight(26);
+        m_comboMic = new QComboBox();
+        m_comboMic->setFixedWidth(168);
+        m_comboMic->setFixedHeight(26);
+        m_comboMic->setStyleSheet(comboStyle);
+        gl->addWidget(m_comboMic);
 
-    m_comboMic = new QComboBox();
-    m_comboMic->setFixedHeight(26);
-    m_comboMic->setStyleSheet(comboStyle);
-    m_deviceStack->insertWidget(kStackPageMic, m_comboMic);
+        lay->addWidget(m_micGroup);
+    }
 
-    m_comboPlayback = new QComboBox();
-    m_comboPlayback->setFixedHeight(26);
-    m_comboPlayback->setStyleSheet(comboStyle);
-    m_deviceStack->insertWidget(kStackPagePlayback, m_comboPlayback);
+    // ── Playback device group (visible in playback-only and "both" modes) ─────
+    {
+        m_playbackGroup = new QWidget();
+        m_playbackGroup->setStyleSheet("background:transparent;");
+        auto* gl = new QVBoxLayout(m_playbackGroup);
+        gl->setContentsMargins(0,0,0,0);
+        gl->setSpacing(1);
 
-    devLay->addWidget(m_deviceStack);
-    lay->addWidget(devGroup);
+        m_playbackGroupLabel = new QLabel("Playback Device");
+        m_playbackGroupLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
+        gl->addWidget(m_playbackGroupLabel);
+
+        m_comboPlayback = new QComboBox();
+        m_comboPlayback->setFixedWidth(168);
+        m_comboPlayback->setFixedHeight(26);
+        m_comboPlayback->setStyleSheet(comboStyle);
+        gl->addWidget(m_comboPlayback);
+
+        lay->addWidget(m_playbackGroup);
+    }
 
     // ── Output Device ─────────────────────────────────────────────────────────
-    auto* outGroup = new QWidget();
-    outGroup->setStyleSheet("background:transparent;");
-    auto* outLay = new QVBoxLayout(outGroup);
-    outLay->setContentsMargins(0,0,0,0);
-    outLay->setSpacing(1);
+    {
+        auto* grp = new QWidget();
+        grp->setStyleSheet("background:transparent;");
+        auto* gl = new QVBoxLayout(grp);
+        gl->setContentsMargins(0,0,0,0);
+        gl->setSpacing(1);
 
-    auto* outLabel = new QLabel("Output Device");
-    outLabel->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
-    outLay->addWidget(outLabel);
+        auto* lbl = new QLabel("Output Device");
+        lbl->setStyleSheet("color:#555; font-size:9px; letter-spacing:0.5px;");
+        gl->addWidget(lbl);
 
-    m_comboOutput = new QComboBox();
-    m_comboOutput->setFixedWidth(150);
-    m_comboOutput->setFixedHeight(26);
-    m_comboOutput->setStyleSheet(comboStyle);
-    outLay->addWidget(m_comboOutput);
-    lay->addWidget(outGroup);
+        m_comboOutput = new QComboBox();
+        m_comboOutput->setFixedWidth(150);
+        m_comboOutput->setFixedHeight(26);
+        m_comboOutput->setStyleSheet(comboStyle);
+        gl->addWidget(m_comboOutput);
+        lay->addWidget(grp);
+    }
 
     lay->addStretch();
 
@@ -389,9 +366,6 @@ QWidget* MainWindow::buildTitleBar() {
     lay->addWidget(btnClose);
 
     // ── Wire device-change signals ─────────────────────────────────────────────
-    // Changing any of these while running restarts capture with the new
-    // routing immediately; changing them while stopped just remembers the
-    // choice for the next Start.
     connect(m_comboSource,   QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onAudioSourceChanged);
     connect(m_comboMic,      QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -405,11 +379,26 @@ QWidget* MainWindow::buildTitleBar() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Show / hide device groups based on current source mode.
+//
+//   microphone  → show mic group,      hide playback group
+//   playback    → hide mic group,      show playback group
+//   both        → show mic group,      show playback group
+// ──────────────────────────────────────────────────────────────────────────────
+void MainWindow::updateDeviceGroupVisibility() {
+    const QString mode = audioSourceMode();
+    const bool isMic      = (mode == "microphone");
+    const bool isPlayback  = (mode == "playback");
+    const bool isBoth      = (mode == "both");
+
+    m_micGroup     ->setVisible(isMic || isBoth);
+    m_playbackGroup->setVisible(isPlayback || isBoth);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Device enumeration & dropdown population
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::populateDeviceDropdowns() {
-    // Block signals while we populate so we don't trigger the change handlers
-    // (and, critically, so we never trip a spurious capture start).
     m_comboSource  ->blockSignals(true);
     m_comboMic     ->blockSignals(true);
     m_comboPlayback->blockSignals(true);
@@ -421,19 +410,13 @@ void MainWindow::populateDeviceDropdowns() {
 
     const auto& s = globalSettings();
 
-    // ── Enumerate all WASAPI endpoints (render loopback + capture mics) ───────
+    // ── Enumerate all WASAPI endpoints ────────────────────────────────────────
     m_inputSources = AudioCapture::enumerateInputSources();
 
-    // "Default microphone" first, then every capture (recording) endpoint —
-    // i.e. "Any recording device" on the system.
     m_comboMic->addItem("🎤 Default Microphone", QVariant());
     m_comboMic->setItemData(0, QString(""), kRoleDeviceId);
     int savedMicIdx = 0;
 
-    // "Default playback device" first, then every render endpoint — Speakers,
-    // Headphones, VoiceMeeter Input/AUX, VB-Cable, or any other Windows
-    // playback device shows up here automatically since it comes straight
-    // from the OS's render-endpoint list.
     m_comboPlayback->addItem("🔊 Default Playback Device", QVariant());
     m_comboPlayback->setItemData(0, QString(""), kRoleDeviceId);
     int savedPlaybackIdx = 0;
@@ -459,11 +442,13 @@ void MainWindow::populateDeviceDropdowns() {
     m_comboMic     ->setCurrentIndex(savedMicIdx);
     m_comboPlayback->setCurrentIndex(savedPlaybackIdx);
 
-    // ── Audio Source: restore last mode (defaults to "playback") ──────────────
-    bool wantMic = (s.audioSourceMode == "microphone");
-    m_comboSource->setCurrentIndex(wantMic ? 0 : 1);
-    m_deviceStack->setCurrentIndex(wantMic ? kStackPageMic : kStackPagePlayback);
-    m_deviceGroupLabel->setText(wantMic ? "Microphone Device" : "Playback Device");
+    // ── Restore saved source mode ─────────────────────────────────────────────
+    // "microphone" → index 0, "playback" → index 1, "both" → index 2
+    int srcIdx = 1; // default: playback
+    if (s.audioSourceMode == "microphone") srcIdx = 0;
+    else if (s.audioSourceMode == "both")  srcIdx = 2;
+    m_comboSource->setCurrentIndex(srcIdx);
+    updateDeviceGroupVisibility();
 
     // ── Output: enumerate PortAudio render devices ─────────────────────────────
     m_outputDevices = AudioCapture::enumerateOutputDevices();
@@ -494,19 +479,35 @@ void MainWindow::populateDeviceDropdowns() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers to read current combo selection
 // ──────────────────────────────────────────────────────────────────────────────
-bool MainWindow::sourceIsMicrophone() const {
-    return m_comboSource->currentData(kRoleSourceMode).toString() == "microphone";
+
+// Returns "microphone", "playback", or "both".
+QString MainWindow::audioSourceMode() const {
+    return m_comboSource->currentData(kRoleSourceMode).toString();
 }
 
+// Primary input device ID.
+//   microphone → mic device ID
+//   playback   → loopback (playback) device ID
+//   both       → loopback device ID (mic comes via selectedMicId())
 std::string MainWindow::selectedInputId() const {
-    return sourceIsMicrophone()
-               ? m_comboMic->currentData(kRoleDeviceId).toString().toStdString()
-               : m_comboPlayback->currentData(kRoleDeviceId).toString().toStdString();
+    const QString mode = audioSourceMode();
+    if (mode == "microphone")
+        return m_comboMic->currentData(kRoleDeviceId).toString().toStdString();
+    // "playback" and "both" both use the loopback as primary.
+    return m_comboPlayback->currentData(kRoleDeviceId).toString().toStdString();
 }
 
+// Primary input type.
 AudioDeviceType MainWindow::selectedInputType() const {
-    return sourceIsMicrophone() ? AudioDeviceType::Microphone
-                                : AudioDeviceType::Loopback;
+    return (audioSourceMode() == "microphone") ? AudioDeviceType::Microphone
+                                               : AudioDeviceType::Loopback;
+}
+
+// Mic device ID used only in "both" mode (empty otherwise).
+std::string MainWindow::selectedMicId() const {
+    if (audioSourceMode() == "both")
+        return m_comboMic->currentData(kRoleDeviceId).toString().toStdString();
+    return {};
 }
 
 std::string MainWindow::selectedOutputId() const {
@@ -514,16 +515,13 @@ std::string MainWindow::selectedOutputId() const {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Persist the current Audio Source + device selections immediately, so a
-// restart (even without ever pressing Start) remembers what the user picked.
+// Persist the current Audio Source + device selections immediately.
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::persistDeviceSelection() {
     auto& s = globalSettings();
-    s.audioSourceMode  = sourceIsMicrophone() ? "microphone" : "playback";
-    s.micDeviceId      = QString::fromStdString(
-                              m_comboMic->currentData(kRoleDeviceId).toString().toStdString());
-    s.playbackDeviceId = QString::fromStdString(
-                              m_comboPlayback->currentData(kRoleDeviceId).toString().toStdString());
+    s.audioSourceMode  = audioSourceMode();
+    s.micDeviceId      = m_comboMic->currentData(kRoleDeviceId).toString();
+    s.playbackDeviceId = m_comboPlayback->currentData(kRoleDeviceId).toString();
     s.outputDeviceId   = QString::fromStdString(selectedOutputId());
     s.save();
 }
@@ -541,22 +539,18 @@ void MainWindow::onStartStop() {
 void MainWindow::startCapture() {
     auto& s = globalSettings();
 
-    // Persist current selection
     persistDeviceSelection();
 
-    // Errors are delivered via the errorOccurred signal → onAudioError,
-    // which shows a dialog and calls stopCapture().  We just reset the button
-    // here so the UI doesn't stay in the "running" state if open() fails.
     QString err;
     bool ok = m_capture->open(selectedInputId(),
                               selectedInputType(),
                               selectedOutputId(),
                               (double)s.sampleRate,
                               s.bufferSize,
-                              err);
+                              err,
+                              selectedMicId());  // non-empty only in "both" mode
     if (!ok) {
         m_btnStart->setChecked(false);
-        // errorOccurred was already emitted inside AudioCapture::open()
         return;
     }
 
@@ -580,10 +574,7 @@ void MainWindow::stopCapture() {
 // Device / source changed (combo boxes)
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::onAudioSourceChanged(int /*idx*/) {
-    bool wantMic = sourceIsMicrophone();
-    m_deviceStack->setCurrentIndex(wantMic ? kStackPageMic : kStackPagePlayback);
-    m_deviceGroupLabel->setText(wantMic ? "Microphone Device" : "Playback Device");
-
+    updateDeviceGroupVisibility();
     persistDeviceSelection();
     if (m_running) {
         stopCapture();
@@ -593,8 +584,9 @@ void MainWindow::onAudioSourceChanged(int /*idx*/) {
 
 void MainWindow::onMicDeviceChanged(int /*idx*/) {
     persistDeviceSelection();
-    // Only affects the live stream if the mic is the active source.
-    if (m_running && sourceIsMicrophone()) {
+    const QString mode = audioSourceMode();
+    // Affects live stream when mic is active (mic-only or both modes).
+    if (m_running && (mode == "microphone" || mode == "both")) {
         stopCapture();
         startCapture();
     }
@@ -602,8 +594,9 @@ void MainWindow::onMicDeviceChanged(int /*idx*/) {
 
 void MainWindow::onPlaybackDeviceChanged(int /*idx*/) {
     persistDeviceSelection();
-    // Only affects the live stream if playback loopback is the active source.
-    if (m_running && !sourceIsMicrophone()) {
+    const QString mode = audioSourceMode();
+    // Affects live stream when loopback is active (playback or both modes).
+    if (m_running && (mode == "playback" || mode == "both")) {
         stopCapture();
         startCapture();
     }
@@ -635,21 +628,12 @@ void MainWindow::onAudioError(const QString& msg) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tab switch: crossfade instead of an instant cut.
-//
-// Approach: grab a snapshot of the outgoing page into a plain overlay label
-// (cheap to fade — no live repaint cost, so Live Tab's VU meter/spectrum
-// timers can't make it stutter), switch the stack to the new page right
-// away, and run two opacity animations in parallel: the overlay 1→0 and the
-// new page 0→1. Both effects are torn down the moment the animation ends so
-// steady-state rendering pays zero extra compositing cost.
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::onTabChanged(int idx) {
     auto* stack  = static_cast<QStackedWidget*>(m_stack);
     int   oldIdx = stack->currentIndex();
     if (oldIdx == idx) return;
 
-    // A tab click mid-transition should feel instant, not queue up behind
-    // the running animation — drop it and start clean.
     if (m_tabAnim) {
         m_tabAnim->stop();
         m_tabAnim->deleteLater();
@@ -660,8 +644,6 @@ void MainWindow::onTabChanged(int idx) {
         m_tabFadeOverlay = nullptr;
     }
     QWidget* oldWidget = stack->widget(oldIdx);
-    // Clears any leftover incoming-fade effect from an interrupted previous
-    // transition so the snapshot below captures it at full opacity.
     if (oldWidget->graphicsEffect()) oldWidget->setGraphicsEffect(nullptr);
 
     QPixmap snapshot = oldWidget->grab();
@@ -680,7 +662,7 @@ void MainWindow::onTabChanged(int idx) {
     incomingEffect->setOpacity(0.0);
     newWidget->setGraphicsEffect(incomingEffect);
 
-    const int kDurationMs = 180; // within the requested 150–250ms window
+    const int kDurationMs = 180;
 
     auto* fadeOut = new QPropertyAnimation(m_tabOverlayEffect, "opacity");
     fadeOut->setDuration(kDurationMs);
@@ -699,9 +681,6 @@ void MainWindow::onTabChanged(int idx) {
     m_tabAnim->addAnimation(fadeIn);
 
     connect(m_tabAnim, &QParallelAnimationGroup::finished, this, [this, newWidget]{
-        // Drop the opacity effects once settled — leaving them attached
-        // would add a compositing pass to every future repaint for no
-        // visual benefit at full opacity.
         if (newWidget) newWidget->setGraphicsEffect(nullptr);
         if (m_tabFadeOverlay) {
             m_tabFadeOverlay->deleteLater();
@@ -736,12 +715,6 @@ void MainWindow::mouseReleaseEvent(QMouseEvent*) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Rounded window background
-//
-// With WA_TranslucentBackground set, the OS surface is fully transparent by
-// default, so we paint our own anti-aliased rounded-rect fill + hairline
-// border here. The central widget and the title/status bars are all set to
-// transparent/matching corner radii so this shows through seamlessly at the
-// four corners instead of a hard rectangular edge.
 // ──────────────────────────────────────────────────────────────────────────────
 void MainWindow::paintEvent(QPaintEvent*) {
     QPainter p(this);
@@ -758,7 +731,13 @@ void MainWindow::paintEvent(QPaintEvent*) {
 
 void MainWindow::closeEvent(QCloseEvent* e) {
     stopCapture();
-    // Persist current device selection before closing
     persistDeviceSelection();
     e->accept();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// showTab — keep the old stacked approach for tabs
+// ──────────────────────────────────────────────────────────────────────────────
+void MainWindow::showTab(int idx) {
+    static_cast<QStackedWidget*>(m_stack)->setCurrentIndex(idx);
 }

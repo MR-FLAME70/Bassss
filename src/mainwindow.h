@@ -21,22 +21,15 @@ class QGraphicsOpacityEffect;
 class QParallelAnimationGroup;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// MainWindow — 800×600 fixed-size frameless dark window matching popup.html.
-//
-// Layout:
-//   [custom title bar: logo | "Bass Nuker" | Audio Source | Playback/Mic Device
-//                      (whichever is active) | Output Device | start/stop | × −]
-//   [tab bar: Live Tab Audio | Advanced | Advanced Audio]
-//   [tab content area — 4 tab panels]
-//   [status bar: status | sample rate | version]
+// MainWindow — 860×600 fixed-size frameless dark window.
 //
 // Audio routing:
 //   The user explicitly chooses what gets processed via the "Audio Source"
-//   selector — Microphone or Playback Device. Nothing is captured until the
-//   user picks a source and presses Start; the microphone is NEVER opened
-//   automatically. Each source keeps its own remembered device selection
-//   (playbackDeviceId / micDeviceId in AppSettings) so switching back and
-//   forth restores the last device chosen for that source, across restarts.
+//   selector:
+//     • Microphone        — direct mic capture only
+//     • Playback Device   — WASAPI loopback (captures what's playing)
+//     • Mic + Speaker     — both simultaneously, mixed before DSP
+//   Nothing is captured until the user picks a source and presses Start.
 // ──────────────────────────────────────────────────────────────────────────────
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -44,11 +37,6 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
-    // Reveals the window with a fade-in + slight scale-up (97% → 100%),
-    // synced with the splash screen's fade-out. Call this instead of show()
-    // for the initial app launch. The window is fully constructed and laid
-    // out before this runs, so there is nothing left to "pop in" — only the
-    // opacity/size transition is animated.
     void playIntroAnimation();
 
 protected:
@@ -82,23 +70,11 @@ private:
     QPoint m_dragStart;
     bool   m_dragging = false;
 
-    // Window corner radius — shared by the top-level paint fill and the
-    // title/status bar chrome so their rounded corners align exactly and
-    // read as one continuous anti-aliased edge instead of a boxy frame.
     static constexpr int kCornerRadius = 12;
-
-    // Fixed window size (see setFixedSize() in the constructor). Kept as
-    // named constants so playIntroAnimation() can temporarily relax the
-    // size constraints for the scale-up animation and then restore exactly
-    // this size afterward.
     static constexpr int kWindowWidth  = 860;
     static constexpr int kWindowHeight = 600;
 
-    // Tab-switch crossfade: a static snapshot of the outgoing page fades out
-    // on top while the incoming page (already switched in underneath) fades
-    // in — both run in parallel, so the whole thing is one short blend
-    // rather than a sequential fade-out-then-fade-in that would feel slower
-    // and jankier than it needs to be.
+    // Tab-switch crossfade
     QLabel*                  m_tabFadeOverlay    = nullptr;
     QGraphicsOpacityEffect*  m_tabOverlayEffect  = nullptr;
     QParallelAnimationGroup* m_tabAnim           = nullptr;
@@ -109,15 +85,21 @@ private:
     QWidget*        m_stack;
     QPushButton*    m_btnStart;
 
-    // Audio Source (Microphone / Playback Device) + its two independent
-    // device selectors. Only one of m_comboMic / m_comboPlayback is visible
-    // at a time, swapped via m_deviceStack based on m_comboSource.
-    QComboBox*       m_comboSource;
-    QStackedWidget*  m_deviceStack;
-    QComboBox*       m_comboMic;
-    QComboBox*       m_comboPlayback;
-    QLabel*          m_deviceGroupLabel;
-    QComboBox*       m_comboOutput;
+    // Audio Source selector + per-mode device groups.
+    // In "Mic + Speaker" (both) mode both mic and playback groups are shown.
+    QComboBox*  m_comboSource;
+
+    // Mic device group (shown in mic-only and both modes)
+    QWidget*    m_micGroup;
+    QLabel*     m_micGroupLabel;
+    QComboBox*  m_comboMic;
+
+    // Playback device group (shown in playback-only and both modes)
+    QWidget*    m_playbackGroup;
+    QLabel*     m_playbackGroupLabel;
+    QComboBox*  m_comboPlayback;
+
+    QComboBox*  m_comboOutput;
 
     LiveTab*          m_liveTab;
     AdvancedTab*      m_advTab;
@@ -132,10 +114,13 @@ private:
     void     startCapture();
     void     stopCapture();
     void     showTab(int idx);
+    void     updateDeviceGroupVisibility();
 
     // Helpers to read current device selection
-    bool            sourceIsMicrophone() const;
-    std::string     selectedInputId()   const;
+    // audioSourceMode() returns "microphone", "playback", or "both"
+    QString         audioSourceMode() const;
+    std::string     selectedInputId()   const;   // primary: loopback or mic
     AudioDeviceType selectedInputType() const;
     std::string     selectedOutputId()  const;
+    std::string     selectedMicId()     const;   // mic ID for "both" mode (empty otherwise)
 };
