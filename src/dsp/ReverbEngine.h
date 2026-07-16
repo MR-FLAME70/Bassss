@@ -129,14 +129,14 @@ public:
     // Process one stereo frame
     void processStereo(float inL, float inR, float& outL, float& outR) {
         // Pre-delay
-        float pdL = readDelay(preDelayBufL, preDelayWrite, preDelaySamples());
-        float pdR = readDelay(preDelayBufR, preDelayWrite, preDelaySamples());
+        float pdL = readDelay(preDelayBufL, preDelayWrite, preDelaySamples(), inL);
+        float pdR = readDelay(preDelayBufR, preDelayWrite, preDelaySamples(), inR);
         writeDelay(preDelayBufL, preDelayWrite, inL);
         writeDelay(preDelayBufR, preDelayWrite, inR);
 
         // ER additional pre-delay (parallel branch off the shared pre-delay)
-        float erInL = readDelay(erDelayBufL, erDelayWrite, erDelaySamples());
-        float erInR = readDelay(erDelayBufR, erDelayWrite, erDelaySamples());
+        float erInL = readDelay(erDelayBufL, erDelayWrite, erDelaySamples(), pdL);
+        float erInR = readDelay(erDelayBufR, erDelayWrite, erDelaySamples(), pdR);
         writeDelay(erDelayBufL, erDelayWrite, pdL);
         writeDelay(erDelayBufR, erDelayWrite, pdR);
 
@@ -197,8 +197,20 @@ private:
                         (int)erDelayBufL.size() - 1);
     }
 
-    static float readDelay(const std::vector<float>& buf, int writeIdx, int delay) {
-        if (delay <= 0 || buf.empty()) return 0.f;
+    // NOTE: a delay of 0 samples must behave as pass-through (return the
+    // sample that is about to be written this call), not silence. The old
+    // `if (delay <= 0) return 0.f;` short-circuit was WRONG: it meant that
+    // whenever a delay control was at its minimum (0 ms) — which is the
+    // *default* for earlyReflectionDelay — the corresponding branch received
+    // permanent silence instead of the signal. For pre-delay this would
+    // silence the whole reverb at preDelay=0; for the ER delay it permanently
+    // silenced the early-reflection convolution branch at its default value,
+    // since erInL/erInR were always 0 and convolving silence yields silence.
+    // Callers pass the about-to-be-written sample as `nextIn` so the delay=0
+    // case can return it directly rather than reading stale buffer content.
+    static float readDelay(const std::vector<float>& buf, int writeIdx, int delay, float nextIn) {
+        if (buf.empty()) return nextIn;
+        if (delay <= 0) return nextIn;
         int n   = (int)buf.size();
         // delay is always < n by construction, so idx is at most one buffer
         // length negative — a single conditional add is enough. The extra
