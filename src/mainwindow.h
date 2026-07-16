@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <memory>
 #include <vector>
+#include <QFutureWatcher>
 #include "settings.h"
 #include "audio/AudioProcessor.h"
 #include "audio/AudioCapture.h"
@@ -60,7 +61,8 @@ private:
     // DSP + capture
     AudioProcessor* m_proc;
     AudioCapture*   m_capture;
-    bool            m_running = false;
+    bool            m_running  = false;
+    bool            m_starting = false;  // true while open() runs in background
 
     // Cached device lists (populated once at startup; refreshable)
     std::vector<AudioDeviceInfo>           m_inputSources;

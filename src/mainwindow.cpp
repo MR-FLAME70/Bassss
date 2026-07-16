@@ -23,6 +23,7 @@
 #include <QGuiApplication>
 #include <QCursor>
 #include <QEasingCurve>
+#include <QtConcurrent>
 
 // ── Data roles for device combo boxes ─────────────────────────────────────────
 // UserRole+0 = device ID string (QString)
@@ -537,29 +538,62 @@ void MainWindow::onStartStop() {
 }
 
 void MainWindow::startCapture() {
-    auto& s = globalSettings();
+    if (m_starting) return;   // guard against double-click during async open
+    m_starting = true;
 
     persistDeviceSelection();
+    auto& s = globalSettings();
 
-    QString err;
-    bool ok = m_capture->open(selectedInputId(),
-                              selectedInputType(),
-                              selectedOutputId(),
-                              (double)s.sampleRate,
-                              s.bufferSize,
-                              err,
-                              selectedMicId());  // non-empty only in "both" mode
-    if (!ok) {
-        m_btnStart->setChecked(false);
-        return;
-    }
+    // Snapshot args before leaving the UI thread
+    auto   inputId   = selectedInputId();
+    auto   inputType = selectedInputType();
+    auto   outputId  = selectedOutputId();
+    auto   micId     = selectedMicId();
+    double sr        = (double)s.sampleRate;
+    int    bufSize   = s.bufferSize;
 
-    m_running = true;
-    m_btnStart->setText("■ Stop");
-    m_btnStart->setChecked(true);
+    // Show feedback immediately so the user knows something is happening
+    m_btnStart->setEnabled(false);
+    m_btnStart->setText("Starting...");
+    m_btnStart->setChecked(false);
 
-    m_liveTab->startAudioDevice(0, 0, m_capture->actualSampleRate(), s.bufferSize);
-    m_proc->applySettings(s);
+    // ── Run the blocking open() on a background thread ────────────────────────
+    // AudioCapture::open() blocks for up to ~3 s on Windows waiting for the
+    // WASAPI ring to pre-fill. Doing that on the UI thread freezes the window.
+    struct OpenResult { bool ok; QString err; };
+    auto* watcher = new QFutureWatcher<OpenResult>(this);
+
+    connect(watcher, &QFutureWatcher<OpenResult>::finished, this,
+            [this, watcher] {
+        watcher->deleteLater();
+        m_starting = false;
+        m_btnStart->setEnabled(true);
+
+        auto res = watcher->result();
+        if (!res.ok) {
+            m_btnStart->setText("▶ Start");
+            m_btnStart->setChecked(false);
+            if (!res.err.isEmpty()) onAudioError(res.err);
+            return;
+        }
+
+        // ── Success: finish setup on the UI thread ────────────────────────
+        auto& s2 = globalSettings();
+        m_running = true;
+        m_btnStart->setText("■ Stop");
+        m_btnStart->setChecked(true);
+        m_liveTab->startAudioDevice(0, 0, m_capture->actualSampleRate(), s2.bufferSize);
+        m_proc->applySettings(s2);
+    });
+
+    QFuture<OpenResult> future = QtConcurrent::run(
+        [this, inputId, inputType, outputId, sr, bufSize, micId]() -> OpenResult {
+            QString err;
+            bool ok = m_capture->open(inputId, inputType, outputId,
+                                      sr, bufSize, err, micId);
+            return {ok, err};
+        });
+    watcher->setFuture(future);
 }
 
 void MainWindow::stopCapture() {

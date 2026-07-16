@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # ── Qt ──────────────────────────────────────────────────────────────────────
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Concurrent)
 
 # ── PortAudio ────────────────────────────────────────────────────────────────
 # On Windows: install PortAudio 19 (e.g. via vcpkg: vcpkg install portaudio)
@@ -177,6 +177,7 @@ target_link_libraries(BassNuker PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Multimedia
+    Qt6::Concurrent
     $<$<BOOL:${PORTAUDIO_TARGET}>:${PORTAUDIO_TARGET}>
     $<$<NOT:$<BOOL:${PORTAUDIO_TARGET}>>:${PORTAUDIO_LIBRARIES}>
 )
