@@ -135,6 +135,15 @@ public:
 
 public slots:
     void run() {
+        // Raise the capture thread to time-critical priority so Windows
+        // schedules it promptly even under system load. Without this,
+        // the OS can delay the capture thread by 15-100 ms, draining the
+        // ring buffer and causing audible freeze/dropout in the output.
+        // SetThreadPriority on the current Win32 thread is instant and
+        // safe to call from any thread context.
+#ifdef _WIN32
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+#endif
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         if (!doCapture()) pRunning->store(false);
         CoUninitialize();

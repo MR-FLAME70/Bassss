@@ -153,6 +153,36 @@ bool AudioCapture::open(const std::string& inputDeviceId,
         }
     }
 
+    // ── Pre-fill: wait until the ring has kTargetLatencyFrames worth of data ──
+    // The WASAPI capture thread starts pushing frames immediately after open().
+    // Without this wait, the PortAudio output callback fires the moment
+    // Pa_StartStream() is called — which is before enough frames have
+    // accumulated — and the first N callbacks pop zeros (underrun). This
+    // manifests as a brief freeze at startup. We block here (main thread is
+    // fine; startup is not time-critical) until the ring has enough data to
+    // sustain smooth output from the very first callback.
+    //
+    // Timeout of 3 s covers the worst-case WASAPI initialization delay.
+    {
+        constexpr int kWaitMs  = 3000;
+        constexpr int kStepMs  = 5;
+        int waited = 0;
+        while (m_ring.available() < StereoRingBuffer::kTargetLatencyFrames
+               && waited < kWaitMs) {
+            QThread::msleep(kStepMs);
+            waited += kStepMs;
+        }
+        // If "both" mode, also pre-fill the mic ring.
+        if (m_mixMode.load()) {
+            waited = 0;
+            while (m_ring2.available() < StereoRingBuffer::kTargetLatencyFrames
+                   && waited < kWaitMs) {
+                QThread::msleep(kStepMs);
+                waited += kStepMs;
+            }
+        }
+    }
+
     if (!openOutputOnly(outputDeviceId, m_sampleRate, bufferSize, errorOut)) {
         emit errorOccurred(errorOut);
         m_wasapi->close();

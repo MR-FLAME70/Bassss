@@ -35,8 +35,19 @@ public:
     // its own. kTargetLatencyFrames is the latency we settle back to after a
     // trim; kMaxLatencyFrames is the backlog threshold that triggers one.
     // Call trimToTargetLatency() once per output callback (cheap, O(1)).
-    static constexpr int kTargetLatencyFrames = 480;  // ~10 ms @ 48 kHz
-    static constexpr int kMaxLatencyFrames    = 1920; // ~40 ms @ 48 kHz
+    //
+    // Why 120 ms target / 240 ms max:
+    //   Windows shared-mode WASAPI runs the capture thread at normal OS
+    //   priority, subject to scheduling jitter of up to 50-100 ms under load.
+    //   A 10-40 ms pre-buffer (the former values) drains completely when the
+    //   OS delays the capture thread, causing the outCallback to output
+    //   silence — heard as a periodic "freeze" or dropout. 120 ms of pre-
+    //   buffer absorbs worst-case Windows scheduling jitter without
+    //   underrunning. The trim ceiling (240 ms) keeps steady-state latency
+    //   bounded. For a DSP enhancement tool (not a real-time monitor), 120 ms
+    //   end-to-end latency is imperceptible to the user.
+    static constexpr int kTargetLatencyFrames = 5760;  // ~120 ms @ 48 kHz
+    static constexpr int kMaxLatencyFrames    = 11520; // ~240 ms @ 48 kHz
 
     void reset() {
         writeIdx.store(0, std::memory_order_relaxed);
