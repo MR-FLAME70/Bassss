@@ -48,10 +48,12 @@ private:
     DarkSlider*  sliderFreq;
     DarkSlider*  sliderGain;
     DarkSlider*  sliderVolume;
+    DarkSlider*  sliderMicVolume;
     ToggleSwitch* toggleBass;
     QLabel*      lblFreqVal;
     QLabel*      lblGainVal;
     QLabel*      lblVolVal;
+    QLabel*      lblMicVolVal;
 
     // ── Main reverb column ────────────────────────────────────────────────────
     ToggleSwitch* toggleReverb;

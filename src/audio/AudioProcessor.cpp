@@ -65,6 +65,7 @@ void AudioProcessor::setSampleRate(double sr) {
     // to feel instant on a slider drag but long enough (several hundred
     // samples) to eliminate the audible step on toggle/mix changes.
     volumeSm_.init(sr, 8.f, volumeGain.load());
+    micGainSm_.init(sr, 8.f, micGain.load());
     drySm_.init(sr, 8.f, dryGain.load());
     wetSm_.init(sr, 8.f, wetGain.load());
     procGainSm_.init(sr, 8.f, processedMasterGain_.load());
@@ -91,6 +92,7 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
                        s.bassOn ? s.gain : 0.0);
 
     volumeGain.store(s.volume / 100.f);
+    micGain.store(s.micVolume / 100.f);
 
     // ── Reverb Engine ─────────────────────────────────────────────────────────
     // Matches offscreen.js exactly: there is a single hybrid reverb engine,
@@ -482,6 +484,13 @@ void AudioProcessor::processStereo(float& l, float& r) {
     wetSm_.setTarget(wetGain.load());
     procGainSm_.setTarget(processedMasterGain_.load());
     bypassGainSm_.setTarget(bypass.load() ? 1.f : 0.f);
+    micGainSm_.setTarget(micGain.load());
+
+    // ── Mic / input gain ─────────────────────────────────────────────────────
+    {
+        float mg = micGainSm_.next();
+        l *= mg; r *= mg;
+    }
 
     // ── Bass low-shelf + volume ───────────────────────────────────────────────
     bassFilter.processStereo(l, r);

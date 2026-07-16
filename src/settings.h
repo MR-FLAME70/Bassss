@@ -18,6 +18,7 @@ struct AppSettings {
 
     // ── Volume / speed ────────────────────────────────────────────────────────
     float volume        = 100.f;   // % of original
+    float micVolume     = 100.f;   // % mic input gain (0–200)
     float speed         = 1.f;     // playback rate (live tab uses this conceptually)
 
     // ── Reverb top-level ──────────────────────────────────────────────────────

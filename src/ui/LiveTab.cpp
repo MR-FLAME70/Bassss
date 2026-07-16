@@ -142,12 +142,20 @@ QWidget* LiveTab::buildBassColumn() {
     lay->addWidget(lblGainVal);
 
     lay->addSpacing(8);
-    lay->addWidget(makeLabel("Volume", 12, true));
+    lay->addWidget(makeLabel("Speaker Volume", 12, true));
     sliderVolume = new DarkSlider(Qt::Horizontal);
     sliderVolume->setRangeF(0, 200, 1);
     lblVolVal    = makeLabel("100 %", 11, false, "#d0d0d0");
     lay->addWidget(sliderVolume);
     lay->addWidget(lblVolVal);
+
+    lay->addSpacing(4);
+    lay->addWidget(makeLabel("Mic Volume", 12, true));
+    sliderMicVolume = new DarkSlider(Qt::Horizontal);
+    sliderMicVolume->setRangeF(0, 200, 1);
+    lblMicVolVal    = makeLabel("100 %", 11, false, "#d0d0d0");
+    lay->addWidget(sliderMicVolume);
+    lay->addWidget(lblMicVolVal);
 
     lay->addStretch();
     return col;
@@ -425,6 +433,11 @@ void LiveTab::connectSignals() {
         lblVolVal->setText(QString::number((int)m_settings.volume) + " %");
         emitSettings();
     });
+    connect(sliderMicVolume, &QSlider::valueChanged, this, [this]{
+        m_settings.micVolume = (float)sliderMicVolume->valueF();
+        lblMicVolVal->setText(QString::number((int)m_settings.micVolume) + " %");
+        emitSettings();
+    });
 
     // ── Main reverb ───────────────────────────────────────────────────────────
     connect(toggleReverb, &ToggleSwitch::toggled, this, [this](bool on){
@@ -625,6 +638,7 @@ void LiveTab::refreshFromSettings(const AppSettings& s) {
     sliderFreq->setValueF(s.frequency);
     sliderGain->setValueF(s.gain);
     sliderVolume->setValueF(s.volume);
+    sliderMicVolume->setValueF(s.micVolume);
 
     toggleReverb->setChecked(s.reverbOn);
     sliderReverbAmount->setValueF(s.reverbAmount);
@@ -656,6 +670,7 @@ void LiveTab::updateLabels() {
     lblFreqVal->setText(QString::number((int)m_settings.frequency) + " Hz");
     lblGainVal->setText(QString::number(m_settings.gain,'f',1) + " dB");
     lblVolVal->setText(QString::number((int)m_settings.volume) + " %");
+    lblMicVolVal->setText(QString::number((int)m_settings.micVolume) + " %");
     lblReverbAmountVal->setText(QString::number((int)m_settings.reverbAmount) + " %");
     lblReverbMixVal->setText(QString::number((int)m_settings.reverbMix) + " %");
 }

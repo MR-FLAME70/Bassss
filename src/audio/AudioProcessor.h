@@ -105,6 +105,7 @@ private:
     // Bass low-shelf (filterNode)
     BiquadFilter bassFilter;
     std::atomic<float> volumeGain{1.f};
+    std::atomic<float> micGain{1.f};
 
     // Reverb
     ReverbEngine reverbEngine;
@@ -126,7 +127,7 @@ private:
     // Smoothed control-rate gains (see ParamSmoother above). Targets are set
     // from applySettingsInternal() (UI-triggered); next() is called once per
     // sample from processStereo() on the audio thread.
-    ParamSmoother volumeSm_, drySm_, wetSm_, procGainSm_, bypassGainSm_;
+    ParamSmoother volumeSm_, drySm_, wetSm_, procGainSm_, bypassGainSm_, micGainSm_;
     bool smoothersInited_ = false;
 
     // Post-processing chain

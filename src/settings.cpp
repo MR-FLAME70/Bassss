@@ -20,6 +20,7 @@ void AppSettings::load() {
     LOAD_F(gain, 12.f);
     LOAD_B(bassOn, true);
     LOAD_F(volume, 100.f);
+    LOAD_F(micVolume, 100.f);
     LOAD_F(speed, 1.f);
 
     LOAD_B(reverbOn, false);
@@ -167,7 +168,7 @@ void AppSettings::save() const {
     QSettings q(ORG, APP);
 #define SAVE(k) q.setValue(#k, k)
     SAVE(frequency); SAVE(gain); SAVE(bassOn);
-    SAVE(volume); SAVE(speed);
+    SAVE(volume); SAVE(micVolume); SAVE(speed);
     SAVE(reverbOn); SAVE(reverbPreset); SAVE(reverbAmount);
     SAVE(reverbDecay); SAVE(reverbMix); SAVE(reverbPredelay);
     SAVE(reverbDiffuse); SAVE(reverbToneHz); SAVE(reverbResonanceHz);
