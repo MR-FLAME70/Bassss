@@ -129,16 +129,25 @@ public:
     // Process one stereo frame
     void processStereo(float inL, float inR, float& outL, float& outR) {
         // Pre-delay
+        // Read both channels BEFORE advancing the write pointer, then write
+        // both into the SAME slot and advance the pointer exactly once.
+        // Previously writeDelay() was called twice, advancing the pointer by 2
+        // per sample: L samples landed on even indices, R on odd indices, and
+        // the shared read position (writeIdx − D) could only ever hit one of
+        // those two interleaved sets — permanently silencing the other channel.
         float pdL = readDelay(preDelayBufL, preDelayWrite, preDelaySamples(), inL);
         float pdR = readDelay(preDelayBufR, preDelayWrite, preDelaySamples(), inR);
-        writeDelay(preDelayBufL, preDelayWrite, inL);
-        writeDelay(preDelayBufR, preDelayWrite, inR);
+        preDelayBufL[preDelayWrite] = inL;
+        preDelayBufR[preDelayWrite] = inR;
+        preDelayWrite = (preDelayWrite + 1) % (int)preDelayBufL.size();
 
         // ER additional pre-delay (parallel branch off the shared pre-delay)
+        // Same fix: single slot per sample, pointer advances once.
         float erInL = readDelay(erDelayBufL, erDelayWrite, erDelaySamples(), pdL);
         float erInR = readDelay(erDelayBufR, erDelayWrite, erDelaySamples(), pdR);
-        writeDelay(erDelayBufL, erDelayWrite, pdL);
-        writeDelay(erDelayBufR, erDelayWrite, pdR);
+        erDelayBufL[erDelayWrite] = pdL;
+        erDelayBufR[erDelayWrite] = pdR;
+        erDelayWrite = (erDelayWrite + 1) % (int)erDelayBufL.size();
 
         // Early reflections — true FIR convolution against the synthesized
         // stereo cave impulse response (independent per channel).

@@ -94,9 +94,8 @@ private:
             break;
         case LowShelf: {
             double sqrtA = std::sqrt(A);
-            alpha = sw0/2.0 * std::sqrt((A+1.0/A)*(1.0/1.0 - 1.0) + 2.0);
-            // Web Audio API uses shelf slope S=1 always
-            double S = 1.0;
+            // Web Audio API shelf slope S=1 → alpha = sin(w0)/sqrt(2)
+            const double S = 1.0;
             alpha = sw0/2.0 * std::sqrt((A+1.0/A)*(1.0/S - 1.0) + 2.0);
             b0 = A*((A+1)-(A-1)*cw0+2*sqrtA*alpha);
             b1 = 2*A*((A-1)-(A+1)*cw0);
