@@ -142,7 +142,7 @@ QWidget* LiveTab::buildBassColumn() {
     lay->addWidget(lblGainVal);
 
     lay->addSpacing(8);
-    lay->addWidget(makeLabel("Speaker Volume", 12, true));
+    lay->addWidget(makeDimLabel("Speaker Volume"));
     sliderVolume = new DarkSlider(Qt::Horizontal);
     sliderVolume->setRangeF(0, 200, 1);
     lblVolVal    = makeLabel("100 %", 11, false, "#d0d0d0");
@@ -150,7 +150,7 @@ QWidget* LiveTab::buildBassColumn() {
     lay->addWidget(lblVolVal);
 
     lay->addSpacing(4);
-    lay->addWidget(makeLabel("Mic Volume", 12, true));
+    lay->addWidget(makeDimLabel("Mic Volume"));
     sliderMicVolume = new DarkSlider(Qt::Horizontal);
     sliderMicVolume->setRangeF(0, 200, 1);
     lblMicVolVal    = makeLabel("100 %", 11, false, "#d0d0d0");
