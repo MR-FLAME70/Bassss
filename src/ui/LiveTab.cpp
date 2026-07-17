@@ -11,11 +11,7 @@
 #include <QAbstractItemView>
 #include <cmath>
 
-// EAX Preset definitions — transcribed field-for-field from the original
-// extension's EAX_PRESETS table (popup.js), after applying its fallback-fill
-// loop (presets that only specify {decay, mix} inherit predelay/diffuse/tone/
-// roomSize/etc. from REVERB_ENGINE_DEFAULTS and the decay-derived formulas).
-// Field order matches ReverbEngine::Params / AppSettings exactly.
+// EAX Preset definitions
 struct EaxPreset {
     const char* name;
     float decay, mix, predelay, diffuse, toneHz, resonanceHz, resonanceQ;
@@ -23,24 +19,11 @@ struct EaxPreset {
     float density, hfDamp, lfDamp, stereoWidth, modDepth, modRate, lowCut;
     float wetLevel, dryLevel;
 };
-// Field order: name, decay, mix, predelay, diffuse, toneHz, resonanceHz,
-//              resonanceQ, roomSize, earlyReflectionDelay,
-//              earlyReflectionLevel, lateReverbLevel, density,
-//              hfDamp, lfDamp, stereoWidth, modDepth, modRate,
-//              lowCut, wetLevel, dryLevel
-//
-// Order mirrors the Chrome extension's popup.html <select> dropdown:
-// Haunted Cavern variants first (the star presets), then performance venues,
-// then the standard EAX room presets (hidden "extra" group in the extension).
 static const EaxPreset EAX_PRESETS[] = {
-  // ── Haunted Cavern family ─────────────────────────────────────────────────
   {"hauntedcavernv1",       5.6f,  68.0f, 22.0f, 88.0f, 2600.0f, 750.0f,  5.0f, 1.0f,  0.0f,  35.0f, 100.0f,  88.0f,  0.0f,  0.0f, 100.0f, 40.0f, 35.0f,  80.0f, 100.0f, 0.0f},
   {"hauntedcavernv2",       9.0f,  74.0f, 38.0f, 78.0f, 3600.0f, 1000.0f, 0.0f, 2.6f,  0.0f,  38.0f, 100.0f,  78.0f, 35.0f, 15.0f, 165.0f, 55.0f, 30.0f,  90.0f, 100.0f, 0.0f},
   {"hauntedcavernv3",       5.5f,  15.0f, 28.0f, 90.0f, 3600.0f, 1000.0f, 0.0f, 2.7f,  0.0f, 280.0f, 667.0f,  90.0f, 30.0f, 12.0f, 150.0f, 50.0f, 25.0f,  85.0f, 100.0f, 0.0f},
-  // Literal I3DL2/EAX registry port (decay 17.01 s, diffuse 10 %, slap-style
-  // predelay capped at 45 ms, no HF resonance ring — see popup.js comment).
   {"hauntedcavernregistry", 17.01f, 50.0f, 45.0f, 10.0f, 5750.0f, 1000.0f, 0.0f, 3.0f, 0.0f, 100.0f, 100.0f,  40.0f,  5.0f,  0.0f, 140.0f, 60.0f, 20.0f,  80.0f, 100.0f, 0.0f},
-  // ── Performance venues ────────────────────────────────────────────────────
   {"concerthall",           3.92f, 45.0f, 20.0f, 90.0f, 8000.0f, 1000.0f, 0.0f, 1.7f,  0.0f,  24.0f, 100.0f,  90.0f, 18.0f,  0.0f, 130.0f, 45.0f, 30.0f,  80.0f, 100.0f, 0.0f},
   {"concerthallv2",         5.6f,  58.0f, 32.0f, 88.0f, 6200.0f, 1000.0f, 0.0f, 2.15f, 4.0f,  30.0f, 100.0f,  92.0f, 32.0f,  8.0f, 155.0f, 40.0f, 28.0f,  90.0f, 100.0f, 0.0f},
   {"amphitheater",          4.6f,  42.0f, 37.0f, 63.0f, 9000.0f, 1000.0f, 0.0f, 1.0f,  0.0f,  35.0f, 100.0f,  63.0f,  0.0f,  0.0f, 100.0f, 40.0f, 35.0f,  80.0f, 100.0f, 0.0f},
@@ -51,7 +34,6 @@ static const EaxPreset EAX_PRESETS[] = {
   {"theater",               1.7f,  33.0f, 14.0f, 45.0f, 9000.0f, 1000.0f, 0.0f, 1.0f,  0.0f,  35.0f, 100.0f,  45.0f,  0.0f,  0.0f, 100.0f, 40.0f, 35.0f,  80.0f, 100.0f, 0.0f},
   {"operahall",             3.6f,  45.0f, 29.0f, 57.0f, 9000.0f, 1000.0f, 0.0f, 1.0f,  0.0f,  35.0f, 100.0f,  57.0f,  0.0f,  0.0f, 100.0f, 40.0f, 35.0f,  80.0f, 100.0f, 0.0f},
   {"royalhall",             4.2f,  48.0f, 34.0f, 60.0f, 9000.0f, 1000.0f, 0.0f, 1.0f,  0.0f,  35.0f, 100.0f,  60.0f,  0.0f,  0.0f, 100.0f, 40.0f, 35.0f,  80.0f, 100.0f, 0.0f},
-  // ── Standard EAX / I3DL2 room presets ────────────────────────────────────
   {"generic",               1.49f, 35.0f,  7.0f, 90.0f, 9000.0f, 1000.0f, 0.0f, 0.8f,  0.0f,   5.0f, 100.0f,  90.0f, 10.0f,  0.0f, 100.0f, 35.0f, 35.0f,  80.0f, 100.0f, 0.0f},
   {"paddedcell",            0.17f, 20.0f,  1.0f, 90.0f, 1500.0f, 1000.0f, 0.0f, 0.35f, 0.0f,  25.0f, 100.0f,  90.0f, 54.0f, 15.0f,  80.0f, 15.0f, 20.0f,  80.0f, 100.0f, 0.0f},
   {"room",                  0.4f,  25.0f,  2.0f, 90.0f, 8200.0f, 1000.0f, 0.0f, 0.4f,  0.0f,  15.0f, 100.0f,  90.0f, 10.0f,  0.0f,  90.0f, 20.0f, 25.0f,  80.0f, 100.0f, 0.0f},
@@ -89,7 +71,7 @@ LiveTab::LiveTab(AudioProcessor* proc, QWidget* parent)
 
     meterTimer = new QTimer(this);
     connect(meterTimer, &QTimer::timeout, this, &LiveTab::onMeterTick);
-    meterTimer->start(33); // ~30fps
+    meterTimer->start(33);
 
     spectrumTimer = new QTimer(this);
     connect(spectrumTimer, &QTimer::timeout, this, &LiveTab::onSpectrumTick);
@@ -116,7 +98,8 @@ void LiveTab::buildUI() {
 QWidget* LiveTab::buildBassColumn() {
     auto* col = new DarkCard();
     auto* lay = new QVBoxLayout(col);
-    lay->setSpacing(10);
+    lay->setSpacing(8);
+    lay->setContentsMargins(14, 14, 14, 14);
 
     // Header
     auto* header = new QHBoxLayout();
@@ -130,6 +113,7 @@ QWidget* LiveTab::buildBassColumn() {
     lay->addWidget(makeDimLabel("Frequency (Hz)"));
     sliderFreq  = new DarkSlider(Qt::Horizontal);
     sliderFreq->setRangeF(20, 500, 1);
+    sliderFreq->setFixedHeight(22);
     lblFreqVal  = makeLabel("150 Hz", 11, false, "#d0d0d0");
     lay->addWidget(sliderFreq);
     lay->addWidget(lblFreqVal);
@@ -137,25 +121,56 @@ QWidget* LiveTab::buildBassColumn() {
     lay->addWidget(makeDimLabel("Gain (dB)"));
     sliderGain  = new DarkSlider(Qt::Horizontal);
     sliderGain->setRangeF(-12, 24, 0.5);
+    sliderGain->setFixedHeight(22);
     lblGainVal  = makeLabel("12 dB", 11, false, "#d0d0d0");
     lay->addWidget(sliderGain);
     lay->addWidget(lblGainVal);
 
-    lay->addSpacing(8);
-    lay->addWidget(makeDimLabel("Speaker Volume"));
-    sliderVolume = new DarkSlider(Qt::Horizontal);
-    sliderVolume->setRangeF(0, 200, 1);
-    lblVolVal    = makeLabel("100 %", 11, false, "#d0d0d0");
-    lay->addWidget(sliderVolume);
-    lay->addWidget(lblVolVal);
+    // ── Separator ─────────────────────────────────────────────────────────────
+    lay->addSpacing(6);
+    {
+        auto* sep = new QFrame();
+        sep->setFrameShape(QFrame::HLine);
+        sep->setStyleSheet("color:#282828;");
+        lay->addWidget(sep);
+    }
+    lay->addSpacing(2);
+
+    // Speaker Volume — final output gain after all DSP
+    lay->addWidget(makeLabel("Speaker Volume", 12, true, "#c8c8c8"));
+    auto* spkHint = makeDimLabel("Controls final output — reverb & echo stay unchanged");
+    spkHint->setStyleSheet("color:#444; font-size:9px;");
+    lay->addWidget(spkHint);
+    {
+        sliderSpeakerVolume = new DarkSlider(Qt::Horizontal);
+        sliderSpeakerVolume->setRangeF(0, 200, 1);
+        sliderSpeakerVolume->setFixedHeight(22);
+        lblSpeakerVolVal = makeLabel("100 %", 11, false, "#d0d0d0");
+        auto* row = new QHBoxLayout();
+        row->setSpacing(8);
+        row->addWidget(sliderSpeakerVolume, 1);
+        row->addWidget(lblSpeakerVolVal);
+        lay->addLayout(row);
+    }
 
     lay->addSpacing(4);
-    lay->addWidget(makeDimLabel("Mic Volume"));
-    sliderMicVolume = new DarkSlider(Qt::Horizontal);
-    sliderMicVolume->setRangeF(0, 200, 1);
-    lblMicVolVal    = makeLabel("100 %", 11, false, "#d0d0d0");
-    lay->addWidget(sliderMicVolume);
-    lay->addWidget(lblMicVolVal);
+
+    // Mic Volume — scales only the microphone signal
+    lay->addWidget(makeLabel("Mic Volume", 12, true, "#c8c8c8"));
+    auto* micHint = makeDimLabel("Controls microphone level only");
+    micHint->setStyleSheet("color:#444; font-size:9px;");
+    lay->addWidget(micHint);
+    {
+        sliderMicVolume = new DarkSlider(Qt::Horizontal);
+        sliderMicVolume->setRangeF(0, 200, 1);
+        sliderMicVolume->setFixedHeight(22);
+        lblMicVolVal = makeLabel("100 %", 11, false, "#d0d0d0");
+        auto* row = new QHBoxLayout();
+        row->setSpacing(8);
+        row->addWidget(sliderMicVolume, 1);
+        row->addWidget(lblMicVolVal);
+        lay->addLayout(row);
+    }
 
     lay->addStretch();
     return col;
@@ -164,8 +179,8 @@ QWidget* LiveTab::buildBassColumn() {
 QWidget* LiveTab::buildReverbColumn() {
     auto* col = new DarkCard();
     auto* lay = new QVBoxLayout(col);
-    lay->setSpacing(12);
-    lay->setContentsMargins(16, 16, 16, 16);
+    lay->setSpacing(10);
+    lay->setContentsMargins(16, 14, 16, 14);
 
     auto makeRow = [&](double lo, double hi, double step,
                        DarkSlider*& sl, QLabel*& lbl, const QString& initial) {
@@ -173,6 +188,17 @@ QWidget* LiveTab::buildReverbColumn() {
         sl->setRangeF(lo, hi, step);
         sl->setFixedHeight(22);
         lbl = new QLabel(initial);
+    };
+
+    auto addInlineRow = [&](DarkSlider*& sl, QLabel*& lbl) {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(10);
+        lbl->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:600;");
+        lbl->setFixedWidth(48);
+        lbl->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        row->addWidget(sl, 1);
+        row->addWidget(lbl);
+        lay->addLayout(row);
     };
 
     auto* header = new QHBoxLayout();
@@ -185,16 +211,7 @@ QWidget* LiveTab::buildReverbColumn() {
 
     lay->addWidget(makeDimLabel("Effect Amount"));
     makeRow(0, 100, 1, sliderReverbAmount, lblReverbAmountVal, "100 %");
-    {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(10);
-        lblReverbAmountVal->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:600;");
-        lblReverbAmountVal->setFixedWidth(48);
-        lblReverbAmountVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        row->addWidget(sliderReverbAmount, 1);
-        row->addWidget(lblReverbAmountVal);
-        lay->addLayout(row);
-    }
+    addInlineRow(sliderReverbAmount, lblReverbAmountVal);
 
     lay->addWidget(makeDimLabel("Preset"));
     comboPreset = new QComboBox();
@@ -229,16 +246,20 @@ QWidget* LiveTab::buildReverbColumn() {
 
     lay->addWidget(makeDimLabel("Mix (%)"));
     makeRow(0, 100, 1, sliderReverbMix, lblReverbMixVal, "74 %");
+    addInlineRow(sliderReverbMix, lblReverbMixVal);
+
+    // ── Reverb Volume ──────────────────────────────────────────────────────────
+    // Scales only the reverb wet signal. Lowering Speaker Volume does NOT
+    // change reverb level (they are now separate controls).
     {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(10);
-        lblReverbMixVal->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:600;");
-        lblReverbMixVal->setFixedWidth(48);
-        lblReverbMixVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        row->addWidget(sliderReverbMix, 1);
-        row->addWidget(lblReverbMixVal);
-        lay->addLayout(row);
+        auto* sep = new QFrame();
+        sep->setFrameShape(QFrame::HLine);
+        sep->setStyleSheet("color:#282828;");
+        lay->addWidget(sep);
     }
+    lay->addWidget(makeDimLabel("Reverb Volume"));
+    makeRow(0, 200, 1, sliderReverbVolume, lblReverbVolumeVal, "100 %");
+    addInlineRow(sliderReverbVolume, lblReverbVolumeVal);
 
     lay->addStretch();
     return col;
@@ -295,22 +316,7 @@ QWidget* LiveTab::buildOutputColumn() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// buildEchoSection — "Basic Echo" full-width panel.
-//
-// All 8 controls live here and are wired directly to the EchoEngine DSP in
-// connectSignals() / refreshFromSettings(). The panel uses a single DarkCard
-// with a two-row grid of (label, slider, value-label) triplets so the layout
-// reads like a mixer strip rather than a vertical list.
-//
-// Control → AppSettings field → EchoEngine::Params field mapping:
-//   Delay Time    → echoDelayMs     → p.delayMs      (1–2000 ms)
-//   Feedback      → echoFeedback    → p.feedback      (0–95 %, hard-clamped)
-//   Num Echoes    → echoNumEchoes   → p.numEchoes     (0 = ∞, 1–10 discrete)
-//   Echo Amount   → echoAmount      → p.echoAmount    (0–100 % input drive)
-//   Wet Level     → echoWetLevel    → p.wetLevel      (0–100 %)
-//   Dry Level     → echoDryLevel    → p.dryLevel      (0–100 %)
-//   Wet/Dry Mix   → echoMix         → p.mix           (0–100 % crossfade)
-//   Output Gain   → echoOutputGain  → p.outputGain    (0–200 %, 100 = unity)
+// buildEchoSection — "Basic Echo" full-width panel with Echo Volume slider.
 // ──────────────────────────────────────────────────────────────────────────────
 QWidget* LiveTab::buildEchoSection() {
     auto* card = new DarkCard();
@@ -326,34 +332,33 @@ QWidget* LiveTab::buildEchoSection() {
     toggleEchoEnable = new ToggleSwitch();
     hdr->addWidget(toggleEchoEnable);
     hdr->addStretch();
-    // Hint to the user that advanced controls exist on the Advanced Audio tab.
     auto* hint = makeDimLabel("Advanced controls → Advanced Audio tab");
     hint->setStyleSheet("color:#444; font-size:10px;");
     hdr->addWidget(hint);
     lay->addLayout(hdr);
 
-    // Thin separator
     auto* sep = new QFrame();
     sep->setFrameShape(QFrame::HLine);
     sep->setStyleSheet("color:#222;");
     lay->addWidget(sep);
 
-    // ── 2-row × 4-column control grid ────────────────────────────────────────
-    // Each cell is: [param label] / [slider] / [value label] stacked vertically.
-    // The grid layout gives each column equal stretch so sliders fill the width.
+    // ── Control grid ──────────────────────────────────────────────────────────
+    // 2 rows of 4 columns for the standard controls, plus a right-hand
+    // "Echo Volume" column spanning both rows.
+    auto* outerRow = new QHBoxLayout();
+    outerRow->setSpacing(14);
+
+    // Left: 4-column grid (2 rows)
     auto* grid = new QGridLayout();
     grid->setHorizontalSpacing(14);
     grid->setVerticalSpacing(4);
 
-    // Helper: create one (label / slider / value) triplet in a grid column.
-    // Rows 0/1/2 = label, slider, value-label.
-    // Rows 3/4/5 = second row of controls.
     auto addControl = [&](int row, int col,
                           const QString& caption,
                           double lo, double hi, double step,
                           DarkSlider*& sl, QLabel*& val,
                           const QString& initVal) {
-        int baseRow = row * 3;                  // 3 Qt rows per logical row
+        int baseRow = row * 3;
         auto* capLbl = makeDimLabel(caption);
         capLbl->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
         grid->addWidget(capLbl, baseRow,   col);
@@ -368,50 +373,52 @@ QWidget* LiveTab::buildEchoSection() {
         grid->addWidget(val, baseRow+2, col);
     };
 
-    // ── Row 0: Delay Time | Feedback | Num Echoes | Echo Amount ──────────────
-    addControl(0, 0, "Delay Time",
-               1, 2000, 1,
-               sliderEchoDelay, lblEchoDelayVal, "350 ms");
+    // Row 0
+    addControl(0, 0, "Delay Time",    1, 2000, 1, sliderEchoDelay,      lblEchoDelayVal,      "350 ms");
+    addControl(0, 1, "Feedback",      0, 95,   1, sliderEchoFeedback,   lblEchoFeedbackVal,   "55 %");
+    addControl(0, 2, "Num Echoes (0=∞)", 0, 10, 1, sliderEchoNumEchoes, lblEchoNumEchoesVal,  "0 (∞)");
+    addControl(0, 3, "Echo Amount",   0, 100,  1, sliderEchoAmount,     lblEchoAmountVal,     "100 %");
 
-    addControl(0, 1, "Feedback",
-               0, 95, 1,
-               sliderEchoFeedback, lblEchoFeedbackVal, "55 %");
+    // Row 1
+    addControl(1, 0, "Wet Level",     0, 100,  1, sliderEchoWetLevel,   lblEchoWetLevelVal,   "100 %");
+    addControl(1, 1, "Dry Level",     0, 100,  1, sliderEchoDryLevel,   lblEchoDryLevelVal,   "100 %");
+    addControl(1, 2, "Wet/Dry Mix",   0, 100,  1, sliderEchoMix,        lblEchoMixVal,        "38 %");
+    addControl(1, 3, "Output Gain",   0, 200,  1, sliderEchoOutputGain, lblEchoOutputGainVal, "100 %");
 
-    addControl(0, 2, "Num Echoes  (0=∞)",
-               0, 10, 1,
-               sliderEchoNumEchoes, lblEchoNumEchoesVal, "0 (∞)");
+    for (int c = 0; c < 4; ++c) grid->setColumnStretch(c, 1);
+    outerRow->addLayout(grid, 4);
 
-    addControl(0, 3, "Echo Amount",
-               0, 100, 1,
-               sliderEchoAmount, lblEchoAmountVal, "100 %");
+    // ── Echo Volume (vertical divider + separate column) ──────────────────────
+    {
+        auto* divider = new QFrame();
+        divider->setFrameShape(QFrame::VLine);
+        divider->setStyleSheet("color:#282828;");
+        outerRow->addWidget(divider);
 
-    // ── Row 1: Wet Level | Dry Level | Wet/Dry Mix | Output Gain ─────────────
-    addControl(1, 0, "Wet Level",
-               0, 100, 1,
-               sliderEchoWetLevel, lblEchoWetLevelVal, "100 %");
+        auto* echoVolCol = new QVBoxLayout();
+        echoVolCol->setSpacing(4);
+        auto* echoVolLabel = makeDimLabel("Echo Volume");
+        echoVolLabel->setAlignment(Qt::AlignCenter);
+        echoVolCol->addWidget(echoVolLabel);
 
-    addControl(1, 1, "Dry Level",
-               0, 100, 1,
-               sliderEchoDryLevel, lblEchoDryLevelVal, "100 %");
+        sliderEchoVolume = new DarkSlider(Qt::Vertical);
+        sliderEchoVolume->setRangeF(0, 200, 1);
+        sliderEchoVolume->setMinimumHeight(60);
+        echoVolCol->addWidget(sliderEchoVolume, 1);
 
-    addControl(1, 2, "Wet/Dry Mix",
-               0, 100, 1,
-               sliderEchoMix, lblEchoMixVal, "38 %");
+        lblEchoVolumeVal = makeLabel("100 %", 10, false, "#c0c0c0");
+        lblEchoVolumeVal->setAlignment(Qt::AlignCenter);
+        echoVolCol->addWidget(lblEchoVolumeVal);
 
-    addControl(1, 3, "Output Gain",
-               0, 200, 1,
-               sliderEchoOutputGain, lblEchoOutputGainVal, "100 %");
+        outerRow->addLayout(echoVolCol);
+    }
 
-    // Equal column stretch — each control gets the same horizontal share.
-    for (int c = 0; c < 4; ++c)
-        grid->setColumnStretch(c, 1);
-
-    lay->addLayout(grid);
+    lay->addLayout(outerRow);
     return card;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// connectSignals — wire every widget change to AppSettings + DSP.
+// connectSignals
 // ──────────────────────────────────────────────────────────────────────────────
 void LiveTab::connectSignals() {
     // ── Bass ──────────────────────────────────────────────────────────────────
@@ -428,11 +435,15 @@ void LiveTab::connectSignals() {
         lblGainVal->setText(QString::number(m_settings.gain,'f',1) + " dB");
         emitSettings();
     });
-    connect(sliderVolume, &QSlider::valueChanged, this, [this]{
-        m_settings.volume = (float)sliderVolume->valueF();
-        lblVolVal->setText(QString::number((int)m_settings.volume) + " %");
+
+    // Speaker Volume → speakerOutputGain (applied AFTER all DSP)
+    connect(sliderSpeakerVolume, &QSlider::valueChanged, this, [this]{
+        m_settings.speakerOutputGain = (float)sliderSpeakerVolume->valueF();
+        lblSpeakerVolVal->setText(QString::number((int)m_settings.speakerOutputGain) + " %");
         emitSettings();
     });
+
+    // Mic Volume → micVolume (applied to mic signal only, not loopback)
     connect(sliderMicVolume, &QSlider::valueChanged, this, [this]{
         m_settings.micVolume = (float)sliderMicVolume->valueF();
         lblMicVolVal->setText(QString::number((int)m_settings.micVolume) + " %");
@@ -456,6 +467,13 @@ void LiveTab::connectSignals() {
         emitSettings();
     });
 
+    // Reverb Volume → reverbVolumeScale (scales reverb wet only)
+    connect(sliderReverbVolume, &QSlider::valueChanged, this, [this]{
+        m_settings.reverbVolumeScale = (float)sliderReverbVolume->valueF();
+        lblReverbVolumeVal->setText(QString::number((int)m_settings.reverbVolumeScale)+" %");
+        emitSettings();
+    });
+
     // ── Output ────────────────────────────────────────────────────────────────
     connect(toggleSpectrum, &ToggleSwitch::toggled, this, [this](bool on){
         m_settings.spectrumOn = on;
@@ -465,32 +483,21 @@ void LiveTab::connectSignals() {
     connect(toggleBypass, &ToggleSwitch::toggled, this, &LiveTab::onBypassToggled);
     connect(btnRecord,    &QPushButton::clicked,   this, &LiveTab::onRecordClicked);
 
-    // ── Basic Echo — all 8 controls ───────────────────────────────────────────
-    // Each lambda writes into m_settings, updates the value label, then calls
-    // emitSettings() which calls AudioProcessor::applySettings() — so the DSP
-    // sees the new parameter within the next audio callback's consumePending().
-
+    // ── Basic Echo — 8 standard controls + Echo Volume ────────────────────────
     connect(toggleEchoEnable, &ToggleSwitch::toggled, this, [this](bool on){
         m_settings.echoOn = on;
         emitSettings();
     });
-
-    // Delay Time (1–2000 ms) → echoDelayMs → EchoEngine::Params::delayMs
     connect(sliderEchoDelay, &QSlider::valueChanged, this, [this]{
         m_settings.echoDelayMs = (float)sliderEchoDelay->valueF();
         lblEchoDelayVal->setText(QString::number((int)m_settings.echoDelayMs) + " ms");
         emitSettings();
     });
-
-    // Feedback (0–95 %) → echoFeedback → p.feedback (hard-clamped to 0.95 in DSP)
     connect(sliderEchoFeedback, &QSlider::valueChanged, this, [this]{
         m_settings.echoFeedback = (float)sliderEchoFeedback->valueF();
         lblEchoFeedbackVal->setText(QString::number((int)m_settings.echoFeedback) + " %");
         emitSettings();
     });
-
-    // Num Echoes (0–10) → echoNumEchoes → p.numEchoes
-    // 0 = infinite feedback mode; 1–10 = discrete N-tap mode.
     connect(sliderEchoNumEchoes, &QSlider::valueChanged, this, [this]{
         m_settings.echoNumEchoes = (int)std::round(sliderEchoNumEchoes->valueF());
         if (m_settings.echoNumEchoes == 0)
@@ -499,39 +506,36 @@ void LiveTab::connectSignals() {
             lblEchoNumEchoesVal->setText(QString::number(m_settings.echoNumEchoes));
         emitSettings();
     });
-
-    // Echo Amount (0–100 %) → echoAmount → p.echoAmount (input drive into delay)
     connect(sliderEchoAmount, &QSlider::valueChanged, this, [this]{
         m_settings.echoAmount = (float)sliderEchoAmount->valueF();
         lblEchoAmountVal->setText(QString::number((int)m_settings.echoAmount) + " %");
         emitSettings();
     });
-
-    // Wet Level (0–100 %) → echoWetLevel → p.wetLevel (effected signal scale)
     connect(sliderEchoWetLevel, &QSlider::valueChanged, this, [this]{
         m_settings.echoWetLevel = (float)sliderEchoWetLevel->valueF();
         lblEchoWetLevelVal->setText(QString::number((int)m_settings.echoWetLevel) + " %");
         emitSettings();
     });
-
-    // Dry Level (0–100 %) → echoDryLevel → p.dryLevel (original signal scale)
     connect(sliderEchoDryLevel, &QSlider::valueChanged, this, [this]{
         m_settings.echoDryLevel = (float)sliderEchoDryLevel->valueF();
         lblEchoDryLevelVal->setText(QString::number((int)m_settings.echoDryLevel) + " %");
         emitSettings();
     });
-
-    // Wet/Dry Mix (0–100 %) → echoMix → p.mix (crossfade: 0=dry, 100=wet)
     connect(sliderEchoMix, &QSlider::valueChanged, this, [this]{
         m_settings.echoMix = (float)sliderEchoMix->valueF();
         lblEchoMixVal->setText(QString::number((int)m_settings.echoMix) + " %");
         emitSettings();
     });
-
-    // Output Gain (0–200 %) → echoOutputGain → p.outputGain (100 = unity)
     connect(sliderEchoOutputGain, &QSlider::valueChanged, this, [this]{
         m_settings.echoOutputGain = (float)sliderEchoOutputGain->valueF();
         lblEchoOutputGainVal->setText(QString::number((int)m_settings.echoOutputGain) + " %");
+        emitSettings();
+    });
+
+    // Echo Volume → echoVolumeScale (scales echo wet delta only)
+    connect(sliderEchoVolume, &QSlider::valueChanged, this, [this]{
+        m_settings.echoVolumeScale = (float)sliderEchoVolume->valueF();
+        lblEchoVolumeVal->setText(QString::number((int)m_settings.echoVolumeScale) + " %");
         emitSettings();
     });
 }
@@ -561,12 +565,6 @@ void LiveTab::onPresetChanged(const QString& name) {
             m_settings.reverbLowCut              = pr.lowCut;
             m_settings.reverbWetLevel            = pr.wetLevel;
             m_settings.reverbDryLevel            = pr.dryLevel;
-            // Enable the Advanced Reverb Engine so the preset's room-size,
-            // early-reflection, late-reverb, damping, etc. values actually
-            // reach the DSP.  Without this, AudioProcessor bypasses those
-            // fields and falls back to neutral defaults, which is why the
-            // preset sounds different from the Chrome extension (where the
-            // Advanced Engine is always active when a preset is selected).
             m_settings.reverbEngineOn            = true;
             refreshFromSettings(m_settings);
             emitSettings();
@@ -594,7 +592,7 @@ void LiveTab::onRecordClicked() {
             ++m_recordSecs;
             lblRecordTime->setText(
                 QString("%1:%2").arg(m_recordSecs/60, 2, 10, QChar('0'))
-                                .arg(m_recordSecs%60, 2, 10, QChar('0')));
+                               .arg(m_recordSecs%60, 2, 10, QChar('0')));
         });
         t->start(1000);
     } else {
@@ -628,8 +626,7 @@ void LiveTab::onSpectrumTick() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// refreshFromSettings — called by MainWindow whenever any tab emits
-// settingsChanged, so all tabs stay in sync.
+// refreshFromSettings
 // ──────────────────────────────────────────────────────────────────────────────
 void LiveTab::refreshFromSettings(const AppSettings& s) {
     m_settings = s;
@@ -637,7 +634,7 @@ void LiveTab::refreshFromSettings(const AppSettings& s) {
     toggleBass->setChecked(s.bassOn);
     sliderFreq->setValueF(s.frequency);
     sliderGain->setValueF(s.gain);
-    sliderVolume->setValueF(s.volume);
+    sliderSpeakerVolume->setValueF(s.speakerOutputGain);
     sliderMicVolume->setValueF(s.micVolume);
 
     toggleReverb->setChecked(s.reverbOn);
@@ -646,12 +643,12 @@ void LiveTab::refreshFromSettings(const AppSettings& s) {
     if (pIdx >= 0) comboPreset->setCurrentIndex(pIdx);
     comboPreset->setToolTip(s.reverbPreset);
     sliderReverbMix->setValueF(s.reverbMix);
+    sliderReverbVolume->setValueF(s.reverbVolumeScale);
 
     toggleSpectrum->setChecked(s.spectrumOn);
     spectrumW->setVisible(s.spectrumOn);
     toggleBypass->setChecked(s.bypass);
 
-    // ── Basic Echo ────────────────────────────────────────────────────────────
     toggleEchoEnable->setChecked(s.echoOn);
     sliderEchoDelay->setValueF(s.echoDelayMs);
     sliderEchoFeedback->setValueF(s.echoFeedback);
@@ -661,6 +658,7 @@ void LiveTab::refreshFromSettings(const AppSettings& s) {
     sliderEchoDryLevel->setValueF(s.echoDryLevel);
     sliderEchoMix->setValueF(s.echoMix);
     sliderEchoOutputGain->setValueF(s.echoOutputGain);
+    sliderEchoVolume->setValueF(s.echoVolumeScale);
 
     updateLabels();
     updateEchoLabels();
@@ -669,10 +667,11 @@ void LiveTab::refreshFromSettings(const AppSettings& s) {
 void LiveTab::updateLabels() {
     lblFreqVal->setText(QString::number((int)m_settings.frequency) + " Hz");
     lblGainVal->setText(QString::number(m_settings.gain,'f',1) + " dB");
-    lblVolVal->setText(QString::number((int)m_settings.volume) + " %");
+    lblSpeakerVolVal->setText(QString::number((int)m_settings.speakerOutputGain) + " %");
     lblMicVolVal->setText(QString::number((int)m_settings.micVolume) + " %");
     lblReverbAmountVal->setText(QString::number((int)m_settings.reverbAmount) + " %");
     lblReverbMixVal->setText(QString::number((int)m_settings.reverbMix) + " %");
+    lblReverbVolumeVal->setText(QString::number((int)m_settings.reverbVolumeScale) + " %");
 }
 
 void LiveTab::updateEchoLabels() {
@@ -686,6 +685,7 @@ void LiveTab::updateEchoLabels() {
     lblEchoDryLevelVal->setText(QString::number((int)m_settings.echoDryLevel) + " %");
     lblEchoMixVal->setText(QString::number((int)m_settings.echoMix) + " %");
     lblEchoOutputGainVal->setText(QString::number((int)m_settings.echoOutputGain) + " %");
+    lblEchoVolumeVal->setText(QString::number((int)m_settings.echoVolumeScale) + " %");
 }
 
 void LiveTab::emitSettings() {

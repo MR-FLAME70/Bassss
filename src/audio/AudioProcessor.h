@@ -34,7 +34,6 @@ public:
     void init(double sampleRate, float timeMs, float initial = 0.f) {
         value  = initial;
         target = initial;
-        // Standard one-pole time-constant coefficient for a ~timeMs settle.
         coeff = (float)std::exp(-1.0 / (sampleRate * (timeMs / 1000.0)));
     }
     void setTarget(float t) { target = t; }
@@ -50,18 +49,22 @@ private:
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AudioProcessor — the complete DSP signal chain, matching offscreen.js exactly.
+// AudioProcessor — the complete DSP signal chain.
 //
-// Signal chain (same order as buildCaptureGraph in offscreen.js):
+// Signal chain:
 //   source
+//     [→ mic gain (only when mic-only mode; "both" mode applies mic gain
+//        in AudioCapture::outCallback before the frames reach here)]
 //     → filterNode       (bass low-shelf boost)
-//     → volumeNode       (output volume gain)
 //     ├→ dryGainNode     → sumNode
-//     └→ reverbEngine    → resonanceNode → wetGainNode → sumNode
+//     └→ reverbEngine    → resonanceNode → wetGainNode × reverbVolScale → sumNode
 //                        → panNode (rotator) → surroundGainNode → sumNode
 //     sumNode → processedMasterGain → outputSumNode
 //   source → bypassGainNode → outputSumNode   (A/B bypass path)
-//     outputSumNode → acousticEngine → advancedAudio chain → speakerConfigEngine
+//     outputSumNode → acousticEngine
+//     → echoEngine (wet delta scaled by echoVolScale) → advanced chain
+//     → speakerConfig
+//     → speakerOutputGain  ← FINAL volume, independent of all effects
 //     → analyserNode → clampNode → output
 //
 // Thread-safe: processStereo() is called from the PortAudio callback thread;
@@ -70,9 +73,6 @@ private:
 class AudioProcessor {
 public:
     AudioProcessor();
-    // Explicit (not = default): must stop and join the recording writer
-    // thread before destruction — a joinable std::thread left dangling in a
-    // destructor calls std::terminate().
     ~AudioProcessor();
 
     void setSampleRate(double sr);
@@ -86,69 +86,83 @@ public:
     MeterData getMeterData();
 
     // Spectrum: FFT magnitude bins. Call from UI thread.
-    // Returns false if spectrum is disabled or no new data.
     bool getSpectrum(std::vector<float>& bins);
 
     // Start/stop recording to WAV (returns file path on stop)
     void startRecording();
     bool stopRecording(const QString& outPath);
 
-    // Enable/disable the entire chain (bypass everything when off)
+    // Enable/disable the entire chain
     void setEnabled(bool on) { enabled.store(on); }
     bool isEnabled() const   { return enabled.load(); }
+
+    // Used by AudioCapture::outCallback to apply mic gain to the mic ring
+    // frames BEFORE summing them with loopback in "both" mode, so the mic
+    // slider only scales the microphone signal and not the loopback.
+    float getMicGainAtomic() const { return micGain.load(); }
 
 private:
     double sampleRate = 44100.0;
     std::atomic<bool> enabled{false};
 
     // ── DSP nodes (audio thread) ─────────────────────────────────────────────
-    // Bass low-shelf (filterNode)
     BiquadFilter bassFilter;
     std::atomic<float> volumeGain{1.f};
     std::atomic<float> micGain{1.f};
 
-    // True only when the current input actually includes a microphone
-    // signal (audioSourceMode == "microphone" or "both"). See
-    // processStereo(): the mic-gain slider must never attenuate the
-    // loopback/reverb path when no mic is in the mix (see bug notes there).
+    // True only when the current input includes a microphone signal AND that
+    // mic gain should be applied here in processStereo (i.e. mic-only mode).
+    // In "both" mode the mic frames are pre-scaled in AudioCapture::outCallback
+    // before being summed with loopback, so we must NOT apply the gain here
+    // a second time (audioSourceBoth handles that gate).
     std::atomic<bool> micInMix{false};
+
+    // True when audioSourceMode == "both". Prevents processStereo from
+    // double-applying micGain when AudioCapture::outCallback already scaled
+    // the mic ring frames before summing.
+    std::atomic<bool> audioSourceBoth{false};
 
     // Reverb
     ReverbEngine reverbEngine;
-    BiquadFilter resonanceFilter; // narrow peaking on wet path
+    BiquadFilter resonanceFilter;
     std::atomic<float> dryGain{1.f};
     std::atomic<float> wetGain{0.f};
+    // Independent reverb wet scale (does not affect dry or final output level)
+    std::atomic<float> reverbVolScale_{1.f};
 
-    // Surround rotation layer (panNode + surroundGainNode)
+    // Surround rotation
     Rotator rotator;
     std::atomic<float> surroundGain{0.f};
 
-    // A/B bypass. processedMasterGain_ is the *target*; bypassMixSm_ is the
-    // actual per-sample crossfade, smoothed so flipping the A/B switch (or
-    // any other module on/off flag feeding gain below) fades in ~8ms instead
-    // of stepping instantly — the latter is a textbook click/pop source.
+    // A/B bypass
     std::atomic<bool>  bypass{false};
     std::atomic<float> processedMasterGain_{1.f};
 
-    // Smoothed control-rate gains (see ParamSmoother above). Targets are set
-    // from applySettingsInternal() (UI-triggered); next() is called once per
-    // sample from processStereo() on the audio thread.
+    // Final output gain — applied AFTER all DSP so lowering it does not
+    // change the reverb/echo wet-to-dry balance in the mix.
+    std::atomic<float> speakerOutputGain_{1.f};
+
+    // Echo wet scale — scales only the echo contribution (the wet delta).
+    std::atomic<float> echoVolScale_{1.f};
+
+    // Smoothed control-rate gains
     ParamSmoother volumeSm_, drySm_, wetSm_, procGainSm_, bypassGainSm_, micGainSm_;
+    ParamSmoother speakerOutSm_, reverbVolSm_, echoVolSm_;
     bool smoothersInited_ = false;
 
     // Post-processing chain
     AcousticEngine acousticEngine;
     Equalizer      equalizer;
     DynamicBass    dynamicBass;
-    Compressor     compressor;    // Advanced Audio compressor
-    Compressor     limiter;       // Advanced Audio limiter
+    Compressor     compressor;
+    Compressor     limiter;
     StereoWidth    stereoWidth;
     PitchShifter   pitchShifter;
     SpeakerConfig  speakerConfig;
     ClampProcessor clamp;
     EchoEngine     echoEngine;
 
-    // Module on/off flags (std::atomic<bool> for thread safety)
+    // Module on/off flags
     std::atomic<bool> acousticEngineOn{false};
     std::atomic<bool> eqOn{false};
     std::atomic<bool> dynBassOn{false};
@@ -158,13 +172,10 @@ private:
     std::atomic<bool> pitchOn{false};
     std::atomic<bool> speakerConfigOn{false};
     std::atomic<bool> reverbOn{false};
-    // Echo: two independent flags so a true-bypass switch can pass audio
-    // through untouched without disabling/losing the module's dialed-in
-    // parameters (see AppSettings::echoBypass doc comment).
     std::atomic<bool> echoOn{false};
     std::atomic<bool> echoBypass{false};
 
-    // ── VU meter / Spectrum (ring-buffer) ────────────────────────────────────
+    // ── VU meter / Spectrum ──────────────────────────────────────────────────
     static constexpr int METER_BUF = 1024;
     std::vector<float> meterBufL, meterBufR;
     int   meterWritePos = 0;
@@ -172,34 +183,18 @@ private:
     MeterData  lastMeter;
 
     // ── Spectrum ──────────────────────────────────────────────────────────────
-    // The audio thread's only job here is to copy incoming samples into a
-    // small ring; once a full block has accumulated it hands the *raw*
-    // samples off (lock-free double buffer, no allocation) and returns
-    // immediately. The actual magnitude-spectrum computation — an O(N^2)
-    // DFT — runs lazily on the UI thread inside getSpectrum(), which is
-    // polled a few times a second and has no real-time deadline. Previously
-    // that O(N^2) loop (128 bins x 256 samples, with cos/sin per term) ran
-    // directly on the audio thread every FFT_SIZE samples (~5.8ms @44.1kHz)
-    // — a periodic multi-thousand-op spike that is a classic dropout source.
     std::atomic<bool> spectrumOn{false};
     static constexpr int FFT_SIZE  = 256;
-    std::array<float, FFT_SIZE> fftBuf_[2]{};     // double-buffered raw samples
+    std::array<float, FFT_SIZE> fftBuf_[2]{};
     int  fftWriteSlot_ = 0;
     int  fftPos_       = 0;
-    std::atomic<int>  fftReadyIndex_{-1};         // slot ready for the UI thread, or -1
-    std::array<float, FFT_SIZE> hannWindow_{};    // precomputed once (was recomputed per-bin)
-    void updateSpectrum(float l, float r); // called from audio thread — O(1)
+    std::atomic<int>  fftReadyIndex_{-1};
+    std::array<float, FFT_SIZE> hannWindow_{};
+    void updateSpectrum(float l, float r);
     void computeSpectrumFromBlock(const std::array<float, FFT_SIZE>& block,
-                                   std::vector<float>& outBins) const; // UI thread
+                                   std::vector<float>& outBins) const;
 
     // ── Recording ────────────────────────────────────────────────────────────
-    // Processed frames are pushed into a lock-free ring (no lock, no
-    // allocation, no per-sample I/O on the audio thread) and streamed to disk
-    // incrementally by a dedicated low-priority writer thread. This bounds
-    // memory usage to the ring's fixed size regardless of recording length
-    // (previously an unbounded std::vector held the *entire* recording in
-    // RAM and grew/reallocated on the audio thread while a mutex was held
-    // for every single sample).
     std::atomic<bool>     recording{false};
     StereoRingBuffer      recordRing_;
     std::thread           recordThread_;
@@ -212,15 +207,7 @@ private:
     void patchWavHeader(std::ofstream& f, uint64_t frames);
 
     // ── Pending parameter update ─────────────────────────────────────────────
-    // The UI thread posts a full AppSettings snapshot into whichever of the
-    // two buffers isn't currently published, then atomically publishes its
-    // index. The audio thread does a single atomic exchange to grab (and
-    // clear) the published index — no mutex, no blocking, no allocation on
-    // the audio thread's side. This replaces a std::mutex + full AppSettings
-    // deep-copy (AppSettings contains QString/std::array members that can
-    // heap-allocate) that previously ran on the real-time thread and risked
-    // priority inversion if the UI thread was ever preempted mid-write.
-    std::mutex          settingsMutex; // UI-thread side only (serializes writers)
+    std::mutex          settingsMutex;
     AppSettings         settingsBuf_[2];
     int                 settingsWriteSlot_ = 0;
     std::atomic<int>    settingsReadyIndex_{-1};

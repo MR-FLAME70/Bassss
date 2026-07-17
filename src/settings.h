@@ -17,9 +17,17 @@ struct AppSettings {
     bool  bassOn        = true;
 
     // ── Volume / speed ────────────────────────────────────────────────────────
-    float volume        = 100.f;   // % of original
+    // volume: input gain applied before the reverb/EQ chain (bass column).
+    // speakerOutputGain: final output gain applied AFTER all DSP — controls
+    //   the speaker level independently of reverb/echo wet levels.
+    float volume        = 100.f;   // % input level (kept for backwards compat)
     float micVolume     = 100.f;   // % mic input gain (0–200)
     float speed         = 1.f;     // playback rate (live tab uses this conceptually)
+
+    // Speaker volume — applied as the LAST gain stage, after all DSP
+    // (reverb, echo, EQ, compressor, etc.) so that lowering it does not
+    // change the reverb or echo wet levels in the mix.
+    float speakerOutputGain = 100.f;  // % (0–200, 100 = unity)
 
     // ── Reverb top-level ──────────────────────────────────────────────────────
     bool  reverbOn      = false;
@@ -29,18 +37,16 @@ struct AppSettings {
     float reverbMix     = 15.f;    // % wet
     float reverbPredelay = 28.f;   // ms
     float reverbDiffuse = 90.f;    // %
-    float reverbToneHz  = 3600.f;  // High Cut Hz — single tone/high-cut control,
-                                    // shared by the Basic "Tone" slider and the
-                                    // Advanced "High Cut" slider (same field in
-                                    // the original extension: reverbFrequency /
-                                    // reverbHighCut both edit currentTone.toneHz).
+    float reverbToneHz  = 3600.f;  // High Cut Hz
     float reverbResonanceHz = 1000.f;
     float reverbResonanceQ  = 0.f;
     float songVolume    = 100.f;   // % dry song level
 
+    // Reverb wet volume — scales only the reverb wet signal in the mix,
+    // independently of the dry level and the speaker output gain.
+    float reverbVolumeScale = 100.f;  // % (0–200, 100 = unity)
+
     // ── Advanced reverb engine ────────────────────────────────────────────────
-    // Defaults match the hauntedcavernv3 preset exactly so the first-run
-    // sound is identical to the Chrome extension's Haunted Cavern v3 sound.
     float reverbRoomSize            = 2.7f;
     float reverbEarlyReflectionDelay  = 0.f;    // ms
     float reverbEarlyReflectionLevel  = 280.f;  // %
@@ -117,17 +123,9 @@ struct AppSettings {
     float speakerLevelRR       = 100.f; // %
 
     // ── Advanced Reverb Engine on/off ─────────────────────────────────────────
-    // Default true so the hauntedcavernv3 preset values above actually reach
-    // the DSP on first run (matches Chrome extension behaviour).
     bool reverbEngineOn = true;
 
     // ── Echo Engine ────────────────────────────────────────────────────────────
-    // Real-time feedback delay line (see dsp/EchoEngine.h). `echoOn` is the
-    // module power switch (included in / excluded from the signal chain);
-    // `echoBypass` is a separate true-bypass switch — when set, the DSP is
-    // skipped entirely (input passed through unmodified) even if echoOn is
-    // true, so parameters/preset stay dialed in while A/B-comparing, exactly
-    // like a bypass footswitch on a hardware delay pedal.
     bool  echoOn      = false;
     bool  echoBypass  = false;
     QString echoPreset = "tapeecho";
@@ -138,29 +136,20 @@ struct AppSettings {
     float echoPingPong  = 15.f;   // % stereo cross-feed
 
     // ── Basic Echo section — additional controls ───────────────────────────
-    // These map to the extended EchoEngine::Params fields added alongside
-    // the Basic Echo UI panel. All stored as % (0-100) except numEchoes
-    // (integer 0-10) and outputGain (0-200 % so unity = 100).
     int   echoNumEchoes  = 0;      // 0 = infinite/feedback, 1-10 = discrete taps
     float echoAmount     = 100.f;  // % input drive into the delay line
     float echoWetLevel   = 100.f;  // % wet (effected) signal level
     float echoDryLevel   = 100.f;  // % dry (original) signal level
     float echoOutputGain = 100.f;  // % post-mix output gain (100 = unity)
 
+    // Echo wet volume — scales only the echo contribution (wet delta) in the
+    // mix, independently of the dry level and the speaker output gain.
+    float echoVolumeScale = 100.f;  // % (0–200, 100 = unity)
+
     // ── Echo Algorithm ────────────────────────────────────────────────────────
-    // Selects the sonic character of the echo engine. Applied automatically
-    // via the DSP layer (no Advanced Echo Engine toggle required). When the
-    // Advanced Echo Engine is also enabled, user AE settings take precedence.
-    // Values: "digital" | "analog" | "tape" | "bucketbrigade" | "vintage" |
-    //         "clean" | "warm" | "dark" | "bright" | "lofi"
     QString echoAlgorithm = "clean";
 
     // ── Advanced Echo Engine ─────────────────────────────────────────────────
-    // All stored in natural UI units (ms, dB, %, Hz, bool). The AudioProcessor
-    // converts to normalised EchoEngine::Params values before calling setParams.
-    // `aeOn` is the Advanced Echo Engine section's collapse/enable toggle;
-    // when false all ae* params are passed as neutral defaults so the DSP
-    // sounds identical to the basic echo path.
     bool  aeOn = false;
 
     // [Delay]
@@ -235,28 +224,7 @@ struct AppSettings {
     bool bypass = false;
 
     // ── Audio routing: source + device selection ──────────────────────────────
-    // Stored as stable string IDs rather than PortAudio indices (which change
-    // between sessions as devices are added/removed).
-    //
-    // audioSourceMode  — "playback" or "microphone". Determines which of the
-    //                    two device IDs below is actually used for capture.
-    //                    Defaults to "playback" so the app NEVER starts
-    //                    listening on the microphone unless the user
-    //                    explicitly selects it.
-    // playbackDeviceId — Windows render-endpoint ID (IMMDevice::GetId) used
-    //                    for WASAPI loopback capture when audioSourceMode ==
-    //                    "playback"; empty = system default playback device.
-    // micDeviceId      — Windows capture-endpoint ID (IMMDevice::GetId) used
-    //                    for direct microphone capture when audioSourceMode
-    //                    == "microphone"; empty = system default microphone.
-    // outputDeviceId   — "<paIndex>:<name>" for the PortAudio render device
-    //                    the processed signal is played back to; empty =
-    //                    system default.
-    //
-    // Each of the three IDs is remembered independently, so switching the
-    // Audio Source back and forth restores whatever device was last picked
-    // for that source instead of forgetting it.
-    QString audioSourceMode = "playback";   // "playback" | "microphone"
+    QString audioSourceMode = "playback";   // "playback" | "microphone" | "both"
     QString playbackDeviceId;
     QString micDeviceId;
     QString outputDeviceId;

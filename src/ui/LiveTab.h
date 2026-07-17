@@ -15,13 +15,12 @@ class AudioProcessor;
 //
 // Layout (vertical):
 //   Top row (3 equal columns):
-//     Left   — Bass Boost controls + Volume
-//     Center — "Main": everyday reverb controls (Enable, Amount, Preset, Mix)
+//     Left   — Bass Boost controls + Speaker Volume + Mic Volume
+//     Center — "Main": reverb controls (Enable, Amount, Preset, Mix,
+//              Reverb Volume)
 //     Right  — Output (VU meter, spectrum, A/B bypass, record)
 //   Bottom section (full width):
-//     Basic Echo — all 8 controls wired to EchoEngine DSP:
-//       Delay Time · Feedback · Num Echoes · Echo Amount
-//       Wet Level  · Dry Level · Wet/Dry Mix · Output Gain
+//     Basic Echo — controls wired to EchoEngine DSP, including Echo Volume
 // ──────────────────────────────────────────────────────────────────────────────
 class LiveTab : public QWidget {
     Q_OBJECT
@@ -47,12 +46,15 @@ private:
     // ── Bass column ───────────────────────────────────────────────────────────
     DarkSlider*  sliderFreq;
     DarkSlider*  sliderGain;
-    DarkSlider*  sliderVolume;
+    // Speaker Volume — final output gain, applied AFTER all DSP so it is
+    // independent of reverb/echo levels. Wired to speakerOutputGain.
+    DarkSlider*  sliderSpeakerVolume;
+    // Mic Volume — scales only the microphone signal, not the loopback.
     DarkSlider*  sliderMicVolume;
     ToggleSwitch* toggleBass;
     QLabel*      lblFreqVal;
     QLabel*      lblGainVal;
-    QLabel*      lblVolVal;
+    QLabel*      lblSpeakerVolVal;
     QLabel*      lblMicVolVal;
 
     // ── Main reverb column ────────────────────────────────────────────────────
@@ -60,6 +62,9 @@ private:
     DarkSlider*   sliderReverbAmount;   QLabel* lblReverbAmountVal;
     QComboBox*    comboPreset;
     DarkSlider*   sliderReverbMix;      QLabel* lblReverbMixVal;
+    // Reverb Volume — scales only the reverb wet signal, independently of
+    // dry level and speaker output gain.
+    DarkSlider*   sliderReverbVolume;   QLabel* lblReverbVolumeVal;
 
     // ── Output column ─────────────────────────────────────────────────────────
     VUMeter*      vuMeter;
@@ -70,7 +75,7 @@ private:
     QLabel*       lblRecordTime;
     QLabel*       lblStatus;
 
-    // ── Basic Echo section — 8 controls, all wired to EchoEngine DSP ─────────
+    // ── Basic Echo section — controls wired to EchoEngine DSP ────────────────
     ToggleSwitch* toggleEchoEnable;
     // Row 1
     DarkSlider*   sliderEchoDelay;      QLabel* lblEchoDelayVal;
@@ -82,6 +87,8 @@ private:
     DarkSlider*   sliderEchoDryLevel;   QLabel* lblEchoDryLevelVal;
     DarkSlider*   sliderEchoMix;        QLabel* lblEchoMixVal;
     DarkSlider*   sliderEchoOutputGain; QLabel* lblEchoOutputGainVal;
+    // Echo Volume — scales only the echo wet contribution, not the dry signal.
+    DarkSlider*   sliderEchoVolume;     QLabel* lblEchoVolumeVal;
 
     // ─────────────────────────────────────────────────────────────────────────
     QTimer* meterTimer;

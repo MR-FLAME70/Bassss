@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <atomic>
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -8,16 +9,6 @@
 // Fixed capacity, no heap allocation after construction — safe to use from a
 // real-time audio thread as either producer or consumer. If full, push()
 // drops the incoming frame rather than blocking or overwriting unread data.
-//
-// Shared by:
-//   • WASAPICapture / AudioCapture — bridges the capture thread and the
-//     PortAudio output thread (see trimToTargetLatency() for why active
-//     latency control matters there).
-//   • AudioProcessor's WAV recorder — bridges the audio thread (producer,
-//     pushes processed frames while recording) and a dedicated low-priority
-//     writer thread (consumer, streams frames to disk) so recording never
-//     takes a lock or grows an unbounded in-memory buffer on the audio
-//     thread.
 // ──────────────────────────────────────────────────────────────────────────────
 class StereoRingBuffer {
 public:
@@ -36,18 +27,25 @@ public:
     // trim; kMaxLatencyFrames is the backlog threshold that triggers one.
     // Call trimToTargetLatency() once per output callback (cheap, O(1)).
     //
-    // Why 120 ms target / 240 ms max:
+    // Why 120 ms target / 200 ms max:
     //   Windows shared-mode WASAPI runs the capture thread at normal OS
     //   priority, subject to scheduling jitter of up to 50-100 ms under load.
-    //   A 10-40 ms pre-buffer (the former values) drains completely when the
-    //   OS delays the capture thread, causing the outCallback to output
-    //   silence — heard as a periodic "freeze" or dropout. 120 ms of pre-
-    //   buffer absorbs worst-case Windows scheduling jitter without
-    //   underrunning. The trim ceiling (240 ms) keeps steady-state latency
-    //   bounded. For a DSP enhancement tool (not a real-time monitor), 120 ms
-    //   end-to-end latency is imperceptible to the user.
+    //   A 10-40 ms pre-buffer drains completely when the OS delays the capture
+    //   thread, causing the outCallback to output silence — heard as a periodic
+    //   "freeze" or dropout. 120 ms of pre-buffer absorbs worst-case Windows
+    //   scheduling jitter without underrunning. The trim ceiling (200 ms) keeps
+    //   steady-state latency bounded. For a DSP enhancement tool (not a
+    //   real-time monitor), 120 ms end-to-end latency is imperceptible.
     static constexpr int kTargetLatencyFrames = 5760;  // ~120 ms @ 48 kHz
-    static constexpr int kMaxLatencyFrames    = 11520; // ~240 ms @ 48 kHz
+    static constexpr int kMaxLatencyFrames    = 9600;  // ~200 ms @ 48 kHz
+
+    // Max frames to skip per outCallback call when trimming.
+    // Gradual trim: instead of one large jump (~120 ms at once — clearly
+    // audible as a cut), advance the read pointer by at most one small block
+    // per callback. At a typical 256-frame callback size this means an excess
+    // of e.g. 4000 frames (~83 ms) is corrected over ~16 callbacks (~0.09 s)
+    // as an imperceptibly slow speed-up rather than an abrupt skip.
+    static constexpr int kTrimStepFrames = 256;
 
     void reset() {
         writeIdx.store(0, std::memory_order_relaxed);
@@ -55,14 +53,7 @@ public:
     }
 
     // Called once from the main thread, right after the startup pre-fill
-    // wait and before Pa_StartStream(). While that wait loop polls
-    // available(), the WASAPI capture thread keeps pushing frames — so by
-    // the time the wait condition is satisfied, the ring can already hold
-    // well more than kTargetLatencyFrames. Without this, the very first
-    // output callback finds queued > kMaxLatencyFrames and performs its
-    // (rare, deliberate) big one-shot skip immediately — heard as an
-    // audible cut right at startup. Snapping down to the target here, once,
-    // before playback even begins, means that skip never has to fire live.
+    // wait and before Pa_StartStream().
     void resetToTargetLatency() {
         int w = writeIdx.load(std::memory_order_acquire);
         int rd = readIdx.load(std::memory_order_relaxed);
@@ -100,17 +91,19 @@ public:
     }
 
     // Called from the consumer thread, once per block.
-    // If the queued backlog exceeds kMaxLatencyFrames, fast-forward the read
-    // pointer to bring queued latency straight back down to
-    // kTargetLatencyFrames. A single, rare, deliberate skip (a few ms of
-    // audio dropped in one shot, inaudible) versus silently carrying a
-    // growing, unbounded delay for the entire session.
+    // If queued latency exceeds kMaxLatencyFrames, advance the read pointer
+    // by at most kTrimStepFrames per call — a gradual catch-up that sounds
+    // like a very slight speed increase rather than the audible "cut" of a
+    // single large skip. Full correction of a 80 ms excess takes ~20 callbacks
+    // (~0.1 s) — imperceptible under normal listening conditions.
     void trimToTargetLatency() {
         int w  = writeIdx.load(std::memory_order_acquire);
         int rd = readIdx.load(std::memory_order_relaxed);
         int queued = w - rd;
         if (queued > kMaxLatencyFrames) {
-            readIdx.store(w - kTargetLatencyFrames, std::memory_order_release);
+            int excess = queued - kTargetLatencyFrames;
+            int skip   = std::min(excess, kTrimStepFrames);
+            readIdx.store(rd + skip, std::memory_order_release);
         }
     }
 
