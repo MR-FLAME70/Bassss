@@ -1,6 +1,7 @@
 #pragma once
 #include "BiquadFilter.h"
 #include "FDNReverb.h"
+#include <atomic>
 #include <cmath>
 #include <vector>
 #include <algorithm>
@@ -77,9 +78,19 @@ public:
         erDelayBufR.assign(erMax, 0.f);
         erDelayWrite = 0;
 
-        // Force a fresh IR build for the current room parameters.
+        // ── Pre-reserve ConvLine history buffers ──────────────────────────────
+        // buildErImpulse() produces at most floor(0.28 * sr) samples.
+        // Pre-reserving 2*maxIrLen ensures setImpulse() called from the audio
+        // thread never needs to reallocate hist (resize() reuses capacity).
+        int maxIrLen = (int)std::floor(0.28 * sr) + 4;
+        erConvL.reserve(maxIrLen);
+        erConvR.reserve(maxIrLen);
+
+        // Discard any pending IR from a previous session (safe on init path).
+        pendingIrReady_.store(-1, std::memory_order_relaxed);
+
+        // Invalidate key so the first buildImpulseAsync() call always builds.
         erImpulseKeyValid = false;
-        rebuildErImpulseIfNeeded(p.roomSize, p.diffusion);
     }
 
     void setSampleRate(double sr) { init(sr); }
@@ -107,7 +118,11 @@ public:
         p.modulationDepth = clampf(p.modulationDepth, 0.f, 1.f);
         p.modulationRate  = clampf(p.modulationRate, 0.f, 1.f);
 
-        rebuildErImpulseIfNeeded(p.roomSize, p.diffusion);
+        // IR rebuild is intentionally NOT triggered here.
+        // setParams() runs on the audio thread (via consumePendingSettings).
+        // The caller (AudioProcessor::applySettings, UI thread) calls
+        // buildImpulseAsync() before storing settings; the audio thread picks
+        // up the finished IR via adoptPendingImpulse() in consumePendingSettings.
 
         FDNReverb::Params fdnP;
         fdnP.roomSize  = p.roomSize;
@@ -279,11 +294,24 @@ private:
         int M   = 1;
         int pos = 0;
 
+        // Pre-allocate history to 2*maxM so setImpulse() called from the
+        // audio thread never triggers a heap allocation (resize() reuses
+        // existing capacity when maxM is respected).
+        void reserve(int maxM) {
+            hist.reserve((size_t)maxM * 2);
+        }
+
+        // RT-safe when reserve(maxM) was called with maxM >= newIr.size().
+        // Uses resize() + fill() instead of assign() so no reallocation
+        // occurs as long as the reserved capacity is sufficient.
         void setImpulse(std::vector<float> newIr) {
             ir = std::move(newIr);
             if (ir.empty()) ir.assign(1, 0.f);
             M = (int)ir.size();
-            hist.assign((size_t)M * 2, 0.f);
+            // resize() reuses existing capacity (no malloc when reserved).
+            // fill() is O(M) but never allocates — safe on audio thread.
+            hist.resize((size_t)M * 2);
+            std::fill(hist.begin(), hist.end(), 0.f);
             pos = 0;
         }
 
@@ -319,35 +347,103 @@ private:
 
     ConvLine erConvL, erConvR;
 
-    bool  erImpulseKeyValid    = false;
-    float erImpulseRoomSize    = -1.f;
-    float erImpulseDiffusion   = -1.f;
+    // ── Lock-free IR hand-off (UI thread → audio thread) ─────────────────────
+    //
+    // Problem: buildErImpulse() allocates heap memory and runs a heavy
+    // computation loop (up to ~27 000 iterations at 96 kHz). Calling it from
+    // the audio thread via setParams() → rebuildErImpulseIfNeeded() caused the
+    // PortAudio callback to exceed its deadline by 1–3 ms, producing buffer
+    // underruns heard as clicks/pops, especially at the start of playback when
+    // the first settings apply triggers a full IR build.
+    //
+    // Fix: build the IR on the UI thread (AudioProcessor::applySettings), store
+    // it in a pre-allocated pending slot, and signal the audio thread via a
+    // single atomic store. The audio thread adopts the IR with a std::move
+    // (O(1)) inside consumePendingSettings() → adoptPendingImpulse(). The
+    // ConvLine::hist buffer is pre-reserved in init() so the resize() inside
+    // setImpulse() never reallocates — making the adoption fully RT-safe.
+    //
+    // SPSC invariant:
+    //   • UI thread always writes to pendingSlots_[pendingIrWriteSlot_].
+    //   • UI thread advances pendingIrWriteSlot_ only after the atomic store,
+    //     so the written slot is never modified again until the audio thread
+    //     has consumed it and the UI thread wraps around (takes 2+ writes).
+    //   • Audio thread pops via atomic exchange — one read, then -1.
+    //   • A freshly moved-from slot is valid-but-empty (std::move guarantee);
+    //     the UI thread repopulates it on the next write to that slot.
 
-    void rebuildErImpulseIfNeeded(float roomSize, float diffusion) {
+    struct PendingIR {
+        std::vector<float> l, r;
+    };
+    PendingIR         pendingSlots_[2];           // only UI thread writes
+    int               pendingIrWriteSlot_ = 0;    // only UI thread advances
+    std::atomic<int>  pendingIrReady_{-1};         // -1=none; 0/1=slot ready
+
+    // IR key tracking — only touched by the UI thread (in buildImpulseAsync).
+    bool  erImpulseKeyValid   = false;
+    float erImpulseRoomSize   = -1.f;
+    float erImpulseDiffusion  = -1.f;
+
+public:
+    // ── UI-thread API ─────────────────────────────────────────────────────────
+    // Call from AudioProcessor::applySettings() (UI thread) before storing
+    // the settings in the atomic double buffer. Builds the IR if roomSize or
+    // diffusion changed, stores it in the pending slot, and signals the audio
+    // thread. Returns immediately (the audio thread picks up the IR later).
+    void buildImpulseAsync(float roomSize, float diffusion) {
         if (erImpulseKeyValid &&
             std::fabs(roomSize  - erImpulseRoomSize)  < 0.0005f &&
             std::fabs(diffusion - erImpulseDiffusion) < 0.0005f) return;
+
         erImpulseKeyValid  = true;
         erImpulseRoomSize  = roomSize;
         erImpulseDiffusion = diffusion;
-        buildErImpulse(roomSize, diffusion);
+
+        // Build into the UI-thread's write slot (no concurrent audio access).
+        buildErImpulse(roomSize, diffusion,
+                       pendingSlots_[pendingIrWriteSlot_].l,
+                       pendingSlots_[pendingIrWriteSlot_].r);
+
+        // Signal the audio thread which slot to read.
+        pendingIrReady_.store(pendingIrWriteSlot_, std::memory_order_release);
+
+        // Advance write slot so the next build goes to the other slot (the
+        // one the audio thread just read, now safely consumed).
+        pendingIrWriteSlot_ = 1 - pendingIrWriteSlot_;
     }
 
+    // ── Audio-thread API ──────────────────────────────────────────────────────
+    // Call from consumePendingSettings() (audio thread) every 128 samples.
+    // O(1) atomic exchange when no IR is pending. When a new IR is available,
+    // swaps it in via std::move (O(1) pointer swap) then zeroes the history
+    // (O(M) fill, ~0.05 ms at 48 kHz — well within a 128-sample window).
+    void adoptPendingImpulse() {
+        int slot = pendingIrReady_.exchange(-1, std::memory_order_acquire);
+        if (slot < 0) return;
+        erConvL.setImpulse(std::move(pendingSlots_[slot].l));
+        erConvR.setImpulse(std::move(pendingSlots_[slot].r));
+    }
+
+private:
     // Exact port of makeCaveEarlyReflectionIR(ctx, {roomSize, diffusion}) from
     // reverb-engine.js: a 2-channel buffer built from 7 golden-ratio-scattered,
     // per-channel-decorrelated, one-pole-lowpassed noise bursts under an
     // exponential decay envelope, peak-normalized to 0.9.
-    void buildErImpulse(float roomSize, float diffusion) {
+    // Writes results into outL / outR (pre-allocated by caller) instead of
+    // calling setImpulse() directly so this can run safely on the UI thread.
+    void buildErImpulse(float roomSize, float diffusion,
+                        std::vector<float>& outL, std::vector<float>& outR) {
         const double sr = sampleRate;
         const double durationSec = std::min(0.28, 0.09 + (double)roomSize * 0.06);
         const int length = std::max(1, (int)std::floor(sr * durationSec));
 
-        std::vector<float> irL((size_t)length, 0.f), irR((size_t)length, 0.f);
+        outL.assign((size_t)length, 0.f);
+        outR.assign((size_t)length, 0.f);
         const int tapCount = 7;
         const double spread = 0.05 + (1.0 - (double)diffusion) * 0.15;
 
         for (int ch = 0; ch < 2; ++ch) {
-            std::vector<float>& data = (ch == 0) ? irL : irR;
+            std::vector<float>& data = (ch == 0) ? outL : outR;
             const double chSeed = (ch == 0) ? 0.37 : 0.71;
 
             const uint32_t seed =
@@ -381,19 +477,16 @@ private:
 
         float peak = 0.f;
         for (int i = 0; i < length; ++i) {
-            peak = std::max(peak, std::fabs(irL[(size_t)i]));
-            peak = std::max(peak, std::fabs(irR[(size_t)i]));
+            peak = std::max(peak, std::fabs(outL[(size_t)i]));
+            peak = std::max(peak, std::fabs(outR[(size_t)i]));
         }
         const float TARGET_PEAK = 0.9f;
         if (peak > TARGET_PEAK) {
             float scale = TARGET_PEAK / peak;
             for (int i = 0; i < length; ++i) {
-                irL[(size_t)i] *= scale;
-                irR[(size_t)i] *= scale;
+                outL[(size_t)i] *= scale;
+                outR[(size_t)i] *= scale;
             }
         }
-
-        erConvL.setImpulse(std::move(irL));
-        erConvR.setImpulse(std::move(irR));
     }
 };

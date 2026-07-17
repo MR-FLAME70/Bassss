@@ -62,6 +62,18 @@ void AudioProcessor::setSampleRate(double sr) {
 }
 
 void AudioProcessor::applySettings(const AppSettings& s) {
+    // ── Build the early-reflection IR on the UI thread ────────────────────────
+    // buildImpulseAsync() allocates heap memory and runs a heavy computation
+    // loop — both are illegal on the real-time audio thread. Calling it here
+    // (UI thread) before the settings double-buffer swap ensures the audio
+    // thread never has to build the IR itself. adoptPendingImpulse() (called
+    // inside consumePendingSettings on the audio thread) picks up the
+    // pre-built IR via a lock-free atomic slot with an O(1) std::move.
+    // Always build — mirrors the original unconditional rebuildErImpulseIfNeeded()
+    // call path. Internally it returns immediately when roomSize+diffusion are
+    // unchanged (key equality check), so repeated calls are negligible cost.
+    reverbEngine.buildImpulseAsync(s.reverbRoomSize, s.reverbDiffuse / 100.f);
+
     std::lock_guard<std::mutex> lk(settingsMutex);
     settingsWriteSlot_ = 1 - settingsWriteSlot_;
     settingsBuf_[settingsWriteSlot_] = s;
@@ -371,6 +383,11 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
 }
 
 void AudioProcessor::consumePendingSettings() {
+    // Adopt any IR pre-built by the UI thread (O(1) atomic load when nothing
+    // is pending; O(M) std::fill on the cycle a new IR arrives — ~0.05 ms,
+    // safely within the 128-sample polling window at 48 kHz).
+    reverbEngine.adoptPendingImpulse();
+
     int idx = settingsReadyIndex_.exchange(-1, std::memory_order_acquire);
     if (idx < 0) return;
     applySettingsInternal(settingsBuf_[idx]);

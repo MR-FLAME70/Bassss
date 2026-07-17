@@ -39,7 +39,10 @@ public:
             gainDb += (target - gainDb) * releaseCoeff;
         }
 
-        float linGain = std::pow(10.f, gainDb/20.f) * makeupLin;
+        // std::pow(10, x/20) = exp(x * ln(10)/20). Using std::exp avoids
+        // the variable-latency codepath of std::pow on every single sample
+        // (this runs 48 000+ times/s for both compressor and limiter).
+        float linGain = std::exp(gainDb * 0.11512925f) * makeupLin; // ln(10)/20 ≈ 0.11513
         l *= linGain;
         r *= linGain;
     }
