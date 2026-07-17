@@ -62,12 +62,20 @@ public:
         }
     }
 
+    // Counts frames silently dropped by push() because the ring was full.
+    // Written by the producer thread, read+reset by the consumer thread via
+    // exchange(0) in outCallback. Used by AudioDiagnostics to detect overruns.
+    std::atomic<uint32_t> pushDropCount{0};
+
     // Called from the producer thread.
-    // Drops the frame silently if the buffer is full (consumer is stalling).
+    // Drops the frame and increments pushDropCount if the buffer is full.
     void push(float l, float r) {
         int w = writeIdx.load(std::memory_order_relaxed);
         int rd = readIdx.load(std::memory_order_acquire);
-        if ((w - rd) >= kCapacity) return; // full — drop rather than overwrite
+        if ((w - rd) >= kCapacity) {
+            pushDropCount.fetch_add(1, std::memory_order_relaxed);
+            return; // full — drop rather than overwrite
+        }
         left [w & kMask] = l;
         right[w & kMask] = r;
         writeIdx.store(w + 1, std::memory_order_release);
@@ -92,11 +100,12 @@ public:
 
     // Called from the consumer thread, once per block.
     // If queued latency exceeds kMaxLatencyFrames, advance the read pointer
-    // by at most kTrimStepFrames per call — a gradual catch-up that sounds
-    // like a very slight speed increase rather than the audible "cut" of a
-    // single large skip. Full correction of a 80 ms excess takes ~20 callbacks
-    // (~0.1 s) — imperceptible under normal listening conditions.
-    void trimToTargetLatency() {
+    // by at most kTrimStepFrames per call — a gradual catch-up.
+    //
+    // Returns the number of frames actually skipped (0 when nothing was trimmed).
+    // The caller (outCallback) uses the return value to detect and log trim
+    // events, which are a direct source of audible discontinuities (clicks).
+    int trimToTargetLatency() {
         int w  = writeIdx.load(std::memory_order_acquire);
         int rd = readIdx.load(std::memory_order_relaxed);
         int queued = w - rd;
@@ -104,7 +113,9 @@ public:
             int excess = queued - kTargetLatencyFrames;
             int skip   = std::min(excess, kTrimStepFrames);
             readIdx.store(rd + skip, std::memory_order_release);
+            return skip;
         }
+        return 0;
     }
 
 private:

@@ -2,6 +2,7 @@
 #include <portaudio.h>
 #include <QString>
 #include <QObject>
+#include <QTimer>
 #include <string>
 #include <vector>
 #include <atomic>
@@ -71,6 +72,14 @@ public:
     bool   isOpen()           const { return m_open.load(); }
     double actualSampleRate() const { return m_sampleRate; }
 
+    // Drain the diagnostic event ring to the log file (UI/timer thread only).
+    // Called automatically every second via an internal QTimer; also callable
+    // manually to get an immediate snapshot.
+    void flushDiagnostics();
+
+    // Absolute path to the diagnostic CSV log file.
+    static std::string diagLogPath();
+
 signals:
     void errorOccurred(const QString& msg);
 
@@ -91,13 +100,14 @@ private:
     std::atomic<bool> m_mixMode{false};  // true when both loopback+mic active
 
     PaStream*        m_outStream = nullptr;
+    QTimer*          m_diagTimer = nullptr;  // flushes diagnostics every 1 s
 
     bool openOutputOnly(const std::string& outputDeviceId,
                         double sampleRate, int bufferSize, QString& err);
     static int outCallback(const void*, void* out,
                            unsigned long frames,
                            const PaStreamCallbackTimeInfo*,
-                           PaStreamCallbackFlags, void* userData);
+                           PaStreamCallbackFlags statusFlags, void* userData);
 #else
     // Non-Windows: standard PortAudio full-duplex
     PaStream* m_stream = nullptr;
