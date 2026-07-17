@@ -206,6 +206,11 @@ private:
     void writeWavHeaderPlaceholder(std::ofstream& f);
     void patchWavHeader(std::ofstream& f, uint64_t frames);
 
+    // ── Settings poll throttle ───────────────────────────────────────────────
+    // consumePendingSettings() is called every 128 samples instead of every
+    // sample to reduce atomic-exchange overhead on the audio thread.
+    int settingsPollCounter_ = 0;
+
     // ── Pending parameter update ─────────────────────────────────────────────
     std::mutex          settingsMutex;
     AppSettings         settingsBuf_[2];

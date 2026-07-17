@@ -380,7 +380,15 @@ void AudioProcessor::consumePendingSettings() {
 // Main audio processing entry-point (called from PortAudio callback thread)
 // ──────────────────────────────────────────────────────────────────────────────
 void AudioProcessor::processStereo(float& l, float& r) {
-    consumePendingSettings();
+    // Only poll for pending settings every 128 samples (~2.7 ms @ 48 kHz).
+    // Calling consumePendingSettings() — which does an atomic exchange —
+    // on every single sample (48 000 × /s) adds unnecessary overhead on the
+    // audio thread. 128-sample granularity is imperceptibly fast for slider
+    // changes and reduces the per-sample cost by 128×.
+    if (++settingsPollCounter_ >= 128) {
+        settingsPollCounter_ = 0;
+        consumePendingSettings();
+    }
 
     if (!enabled.load()) {
         return;

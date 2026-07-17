@@ -98,10 +98,10 @@ void LiveTab::buildUI() {
 QWidget* LiveTab::buildBassColumn() {
     auto* col = new DarkCard();
     auto* lay = new QVBoxLayout(col);
-    lay->setSpacing(8);
-    lay->setContentsMargins(14, 14, 14, 14);
+    lay->setSpacing(0);
+    lay->setContentsMargins(16, 14, 16, 14);
 
-    // Header
+    // ── Bass Boost header ──────────────────────────────────────────────────────
     auto* header = new QHBoxLayout();
     auto* title = makeLabel("Bass Boost", 13, true, "#ffffff");
     toggleBass = new ToggleSwitch();
@@ -109,68 +109,71 @@ QWidget* LiveTab::buildBassColumn() {
     header->addStretch();
     header->addWidget(toggleBass);
     lay->addLayout(header);
+    lay->addSpacing(10);
 
+    // Frequency
     lay->addWidget(makeDimLabel("Frequency (Hz)"));
-    sliderFreq  = new DarkSlider(Qt::Horizontal);
+    lay->addSpacing(4);
+    sliderFreq = new DarkSlider(Qt::Horizontal);
     sliderFreq->setRangeF(20, 500, 1);
     sliderFreq->setFixedHeight(22);
-    lblFreqVal  = makeLabel("150 Hz", 11, false, "#d0d0d0");
     lay->addWidget(sliderFreq);
+    lay->addSpacing(3);
+    lblFreqVal = makeLabel("150 Hz", 11, false, "#d0d0d0");
     lay->addWidget(lblFreqVal);
+    lay->addSpacing(12);
 
+    // Gain
     lay->addWidget(makeDimLabel("Gain (dB)"));
-    sliderGain  = new DarkSlider(Qt::Horizontal);
+    lay->addSpacing(4);
+    sliderGain = new DarkSlider(Qt::Horizontal);
     sliderGain->setRangeF(-12, 24, 0.5);
     sliderGain->setFixedHeight(22);
-    lblGainVal  = makeLabel("12 dB", 11, false, "#d0d0d0");
     lay->addWidget(sliderGain);
+    lay->addSpacing(3);
+    lblGainVal = makeLabel("12 dB", 11, false, "#d0d0d0");
     lay->addWidget(lblGainVal);
 
     // ── Separator ─────────────────────────────────────────────────────────────
-    lay->addSpacing(6);
+    lay->addSpacing(14);
     {
         auto* sep = new QFrame();
         sep->setFrameShape(QFrame::HLine);
         sep->setStyleSheet("color:#282828;");
         lay->addWidget(sep);
     }
-    lay->addSpacing(2);
+    lay->addSpacing(12);
 
-    // Speaker Volume — final output gain after all DSP
-    lay->addWidget(makeLabel("Speaker Volume", 12, true, "#c8c8c8"));
-    auto* spkHint = makeDimLabel("Controls final output — reverb & echo stay unchanged");
-    spkHint->setStyleSheet("color:#444; font-size:9px;");
-    lay->addWidget(spkHint);
+    // ── Speaker Volume ────────────────────────────────────────────────────────
     {
-        sliderSpeakerVolume = new DarkSlider(Qt::Horizontal);
-        sliderSpeakerVolume->setRangeF(0, 200, 1);
-        sliderSpeakerVolume->setFixedHeight(22);
-        lblSpeakerVolVal = makeLabel("100 %", 11, false, "#d0d0d0");
         auto* row = new QHBoxLayout();
-        row->setSpacing(8);
-        row->addWidget(sliderSpeakerVolume, 1);
+        row->addWidget(makeLabel("Speaker Volume", 12, true, "#c8c8c8"));
+        row->addStretch();
+        lblSpeakerVolVal = makeLabel("100 %", 11, false, "#d0d0d0");
         row->addWidget(lblSpeakerVolVal);
         lay->addLayout(row);
     }
-
     lay->addSpacing(4);
+    sliderSpeakerVolume = new DarkSlider(Qt::Horizontal);
+    sliderSpeakerVolume->setRangeF(0, 200, 1);
+    sliderSpeakerVolume->setFixedHeight(22);
+    lay->addWidget(sliderSpeakerVolume);
+    lay->addSpacing(14);
 
-    // Mic Volume — scales only the microphone signal
-    lay->addWidget(makeLabel("Mic Volume", 12, true, "#c8c8c8"));
-    auto* micHint = makeDimLabel("Controls microphone level only");
-    micHint->setStyleSheet("color:#444; font-size:9px;");
-    lay->addWidget(micHint);
+    // ── Mic Volume ────────────────────────────────────────────────────────────
     {
-        sliderMicVolume = new DarkSlider(Qt::Horizontal);
-        sliderMicVolume->setRangeF(0, 200, 1);
-        sliderMicVolume->setFixedHeight(22);
-        lblMicVolVal = makeLabel("100 %", 11, false, "#d0d0d0");
         auto* row = new QHBoxLayout();
-        row->setSpacing(8);
-        row->addWidget(sliderMicVolume, 1);
+        row->addWidget(makeLabel("Mic Volume", 12, true, "#c8c8c8"));
+        row->addStretch();
+        lblMicVolVal = makeLabel("100 %", 11, false, "#d0d0d0");
         row->addWidget(lblMicVolVal);
         lay->addLayout(row);
     }
+    lay->addSpacing(4);
+    sliderMicVolume = new DarkSlider(Qt::Horizontal);
+    sliderMicVolume->setRangeF(0, 200, 1);
+    sliderMicVolume->setFixedHeight(22);
+    lay->addWidget(sliderMicVolume);
 
     lay->addStretch();
     return col;
@@ -179,41 +182,45 @@ QWidget* LiveTab::buildBassColumn() {
 QWidget* LiveTab::buildReverbColumn() {
     auto* col = new DarkCard();
     auto* lay = new QVBoxLayout(col);
-    lay->setSpacing(10);
+    lay->setSpacing(0);
     lay->setContentsMargins(16, 14, 16, 14);
 
-    auto makeRow = [&](double lo, double hi, double step,
-                       DarkSlider*& sl, QLabel*& lbl, const QString& initial) {
-        sl  = new DarkSlider(Qt::Horizontal);
+    // Helper: slider + value label on the same row
+    auto addSliderRow = [&](DarkSlider*& sl, QLabel*& lbl,
+                            double lo, double hi, double step,
+                            const QString& initial) {
+        sl = new DarkSlider(Qt::Horizontal);
         sl->setRangeF(lo, hi, step);
         sl->setFixedHeight(22);
         lbl = new QLabel(initial);
-    };
-
-    auto addInlineRow = [&](DarkSlider*& sl, QLabel*& lbl) {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(10);
         lbl->setStyleSheet("color:#d0d0d0; font-size:11px; font-weight:600;");
         lbl->setFixedWidth(48);
         lbl->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        auto* row = new QHBoxLayout();
+        row->setSpacing(8);
         row->addWidget(sl, 1);
         row->addWidget(lbl);
         lay->addLayout(row);
     };
 
+    // ── Header ────────────────────────────────────────────────────────────────
     auto* header = new QHBoxLayout();
-    auto* title  = makeLabel("Main", 14, true, "#ffffff");
-    toggleReverb = new ToggleSwitch();
-    header->addWidget(title);
+    header->addWidget(makeLabel("Main", 14, true, "#ffffff"));
     header->addStretch();
+    toggleReverb = new ToggleSwitch();
     header->addWidget(toggleReverb);
     lay->addLayout(header);
+    lay->addSpacing(12);
 
+    // Effect Amount
     lay->addWidget(makeDimLabel("Effect Amount"));
-    makeRow(0, 100, 1, sliderReverbAmount, lblReverbAmountVal, "100 %");
-    addInlineRow(sliderReverbAmount, lblReverbAmountVal);
+    lay->addSpacing(4);
+    addSliderRow(sliderReverbAmount, lblReverbAmountVal, 0, 100, 1, "100 %");
+    lay->addSpacing(12);
 
+    // Preset
     lay->addWidget(makeDimLabel("Preset"));
+    lay->addSpacing(4);
     comboPreset = new QComboBox();
     comboPreset->setMinimumHeight(36);
     comboPreset->setStyleSheet(R"(
@@ -243,23 +250,27 @@ QWidget* LiveTab::buildReverbColumn() {
     comboPreset->view()->setMinimumWidth(comboPreset->minimumSizeHint().width() + 60);
     comboPreset->setMaxVisibleItems(14);
     lay->addWidget(comboPreset);
+    lay->addSpacing(12);
 
+    // Mix
     lay->addWidget(makeDimLabel("Mix (%)"));
-    makeRow(0, 100, 1, sliderReverbMix, lblReverbMixVal, "74 %");
-    addInlineRow(sliderReverbMix, lblReverbMixVal);
+    lay->addSpacing(4);
+    addSliderRow(sliderReverbMix, lblReverbMixVal, 0, 100, 1, "74 %");
 
-    // ── Reverb Volume ──────────────────────────────────────────────────────────
-    // Scales only the reverb wet signal. Lowering Speaker Volume does NOT
-    // change reverb level (they are now separate controls).
+    // ── Separator ─────────────────────────────────────────────────────────────
+    lay->addSpacing(14);
     {
         auto* sep = new QFrame();
         sep->setFrameShape(QFrame::HLine);
         sep->setStyleSheet("color:#282828;");
         lay->addWidget(sep);
     }
+    lay->addSpacing(12);
+
+    // Reverb Volume
     lay->addWidget(makeDimLabel("Reverb Volume"));
-    makeRow(0, 200, 1, sliderReverbVolume, lblReverbVolumeVal, "100 %");
-    addInlineRow(sliderReverbVolume, lblReverbVolumeVal);
+    lay->addSpacing(4);
+    addSliderRow(sliderReverbVolume, lblReverbVolumeVal, 0, 200, 1, "100 %");
 
     lay->addStretch();
     return col;
