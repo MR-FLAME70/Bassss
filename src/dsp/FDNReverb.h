@@ -15,6 +15,17 @@ class FDNReverb {
 public:
     static constexpr int N = 8;
 
+    // Anti-denormal: same technique as EchoEngine's kAntiDenormal — a
+    // negligible alternating-sign DC offset injected into the feedback
+    // loop's write-back point. Without this, a loud transient's reverb tail
+    // decays exponentially toward true zero and spends an extended time
+    // (as long as the tail is audible) passing through the denormal float
+    // range, where some CPUs run every subsequent op on that state 10-100x
+    // slower — heard as crackling that starts after a loud hit and persists
+    // until the tail (and its denormal state) finally dies out. Alternating
+    // the sign per line keeps the net DC contribution to the output ~0.
+    static constexpr float kAntiDenormal = 1e-25f;
+
     // Parameter struct (all values match worklet defaults/ranges)
     struct Params {
         float roomSize        = 1.0f;  // 0.25..3.0
@@ -161,6 +172,7 @@ public:
             float mixed  = damped[ln] - sub;
             float inject = (ln % 2 == 0) ? dL : dR;
             float wv = mixed + inject * 0.6f;
+            wv += (ln % 2 == 0) ? kAntiDenormal : -kAntiDenormal;
             buffers[ln][writeIdx[ln]] = wv;
             writeIdx[ln] = (writeIdx[ln] + 1) % bufLen;
             lOut += mixed * TAP_L[ln];
