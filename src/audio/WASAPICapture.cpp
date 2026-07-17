@@ -1,5 +1,4 @@
 #include "WASAPICapture.h"
-#include "AudioDiagnostics.h"
 #include <QMetaObject>
 #include <cstring>
 #include <cmath>
@@ -347,79 +346,38 @@ private:
         // ── Capture loop ──────────────────────────────────────────────────────
         // All we do here: convert raw WASAPI frames → push to ring buffer.
         // DSP (reverb, EQ, etc.) runs in the PortAudio output callback thread.
-        //
-        // INSTRUMENTED: we track the wall-clock time between consecutive WASAPI
-        // events (inter-event period) and the total frames delivered per event.
-        // A late or over-large event means the WASAPI scheduler stalled this
-        // thread — the burst of frames then overflows the ring, triggering
-        // trimToTargetLatency() in the next outCallback, which skips frames
-        // (= click). Logging these bursts lets us correlate capture-side
-        // scheduling jitter with the playback-side glitch timestamps.
-        {
-            auto& diag = AudioDiagnostics::instance();
+        while (pRunning->load(std::memory_order_relaxed)) {
+            DWORD wr = WaitForSingleObject(hEvent, 200);
+            if (wr == WAIT_TIMEOUT) continue;
+            if (wr != WAIT_OBJECT_0) break;
 
-            // Expected WASAPI period in microseconds.
-            // defaultPeriod is in REFERENCE_TIME (100-ns units); ÷10 → μs.
-            int expectedPeriodUs  = (defaultPeriod > 0)
-                                    ? (int)(defaultPeriod / 10) : 10000;
-            // Expected frames per event at the negotiated sample rate.
-            int expectedFrames    = (int)((double)defaultPeriod
-                                          / 10'000'000.0 * (*pActualRate));
-            if (expectedFrames < 1) expectedFrames = 480; // fallback: 10 ms @ 48 kHz
+            UINT32 packetSize = 0;
+            hr = captureClient->GetNextPacketSize(&packetSize);
+            if (FAILED(hr)) break;
 
-            int64_t lastEventNs = diag.nowNs();
-
-            while (pRunning->load(std::memory_order_relaxed)) {
-                DWORD wr = WaitForSingleObject(hEvent, 200);
-                if (wr == WAIT_TIMEOUT) continue;
-                if (wr != WAIT_OBJECT_0) break;
-
-                // Measure inter-event period (time since the previous WASAPI wakeup).
-                int64_t nowEvNs = diag.nowNs();
-                int periodUs    = (int)((nowEvNs - lastEventNs) / 1000);
-                lastEventNs     = nowEvNs;
-
-                UINT32 packetSize = 0;
-                hr = captureClient->GetNextPacketSize(&packetSize);
+            while (packetSize > 0) {
+                BYTE*  data       = nullptr;
+                UINT32 numFrames  = 0;
+                DWORD  flags      = 0;
+                hr = captureClient->GetBuffer(&data, &numFrames, &flags, nullptr, nullptr);
                 if (FAILED(hr)) break;
 
-                int totalFramesThisEvent = 0;
-                while (packetSize > 0) {
-                    BYTE*  data       = nullptr;
-                    UINT32 numFrames  = 0;
-                    DWORD  flags      = 0;
-                    hr = captureClient->GetBuffer(&data, &numFrames, &flags,
-                                                  nullptr, nullptr);
-                    if (FAILED(hr)) break;
+                const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
 
-                    const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
-
-                    if (!silent && data && numFrames > 0) {
-                        for (UINT32 i = 0; i < numFrames; ++i) {
-                            float l = 0.f, r = 0.f;
-                            convertFrame(data, mixFmt, i, l, r);
-                            ring->push(l, r);   // raw — no DSP here
-                        }
-                    } else {
-                        // Push silence so output stays in sync with input timing
-                        for (UINT32 i = 0; i < numFrames; ++i)
-                            ring->push(0.f, 0.f);
+                if (!silent && data && numFrames > 0) {
+                    for (UINT32 i = 0; i < numFrames; ++i) {
+                        float l = 0.f, r = 0.f;
+                        convertFrame(data, mixFmt, i, l, r);
+                        ring->push(l, r);   // raw — no DSP here
                     }
-
-                    totalFramesThisEvent += (int)numFrames;
-                    captureClient->ReleaseBuffer(numFrames);
-                    captureClient->GetNextPacketSize(&packetSize);
+                } else {
+                    // Push silence so output stays in sync with input timing
+                    for (UINT32 i = 0; i < numFrames; ++i)
+                        ring->push(0.f, 0.f);
                 }
 
-                // Log if the WASAPI thread was notably late (> 2× expected period)
-                // OR delivered an unusually large batch (> 2× expected frames).
-                // Either condition causes the ring fill to spike, which then
-                // triggers trimToTargetLatency() in the output callback → click.
-                if (periodUs    > expectedPeriodUs  * 2 ||
-                    totalFramesThisEvent > expectedFrames * 2) {
-                    diag.logCaptureBurst(totalFramesThisEvent,
-                                         periodUs, expectedPeriodUs);
-                }
+                captureClient->ReleaseBuffer(numFrames);
+                captureClient->GetNextPacketSize(&packetSize);
             }
         }
 

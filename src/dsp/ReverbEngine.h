@@ -154,7 +154,8 @@ public:
         float pdR = readDelay(preDelayBufR, preDelayWrite, preDelaySamples(), inR);
         preDelayBufL[preDelayWrite] = inL;
         preDelayBufR[preDelayWrite] = inR;
-        preDelayWrite = (preDelayWrite + 1) % (int)preDelayBufL.size();
+        // Conditional-add replaces % — no integer division on the audio thread.
+        if (++preDelayWrite >= (int)preDelayBufL.size()) preDelayWrite = 0;
 
         // ER additional pre-delay (parallel branch off the shared pre-delay)
         // Same fix: single slot per sample, pointer advances once.
@@ -162,7 +163,7 @@ public:
         float erInR = readDelay(erDelayBufR, erDelayWrite, erDelaySamples(), pdR);
         erDelayBufL[erDelayWrite] = pdL;
         erDelayBufR[erDelayWrite] = pdR;
-        erDelayWrite = (erDelayWrite + 1) % (int)erDelayBufL.size();
+        if (++erDelayWrite >= (int)erDelayBufL.size()) erDelayWrite = 0;
 
         // Early reflections — true FIR convolution against the synthesized
         // stereo cave impulse response (independent per channel).
@@ -294,20 +295,40 @@ private:
         int M   = 1;
         int pos = 0;
 
-        // Pre-allocate history to 2*maxM so setImpulse() called from the
-        // audio thread never triggers a heap allocation (resize() reuses
-        // existing capacity when maxM is respected).
+        // Pre-allocate ir and history to maxM / 2*maxM so setImpulse() called
+        // from the audio thread never triggers a heap allocation or
+        // deallocation. Both resize() calls below reuse existing capacity when
+        // maxM is respected.
         void reserve(int maxM) {
+            ir.reserve((size_t)maxM);        // NEW: pre-reserve ir so setImpulse
+                                             //      never frees the old buffer on
+                                             //      the audio thread.
             hist.reserve((size_t)maxM * 2);
         }
 
-        // RT-safe when reserve(maxM) was called with maxM >= newIr.size().
-        // Uses resize() + fill() instead of assign() so no reallocation
-        // occurs as long as the reserved capacity is sufficient.
-        void setImpulse(std::vector<float> newIr) {
-            ir = std::move(newIr);
-            if (ir.empty()) ir.assign(1, 0.f);
-            M = (int)ir.size();
+        // Fully RT-safe when reserve(maxM) was called with maxM >= newIr.size().
+        //
+        // Takes the new IR by const-ref and copies element-wise into the
+        // pre-reserved ir vector.  This replaces the previous
+        //   ir = std::move(newIr);
+        // pattern which moved the old ir buffer into the by-value parameter and
+        // then freed it via the parameter's destructor at end-of-scope — a
+        // free() call on the audio thread that can block on the process heap
+        // lock and cause clicks/pops.
+        //
+        // With const-ref + resize() + std::copy:
+        //   • ir.resize(M)   — reuses existing capacity (no malloc, no free).
+        //   • std::copy      — O(M) element write, zero heap operations.
+        //   • hist.resize()  — reuses existing capacity (no malloc, no free).
+        //   • std::fill      — O(M) zeroing, zero heap operations.
+        void setImpulse(const std::vector<float>& newIr) {
+            M = newIr.empty() ? 1 : (int)newIr.size();
+            ir.resize((size_t)M);            // reuses capacity — no malloc/free
+            if (newIr.empty()) {
+                ir[0] = 0.f;
+            } else {
+                std::copy(newIr.begin(), newIr.end(), ir.begin());
+            }
             // resize() reuses existing capacity (no malloc when reserved).
             // fill() is O(M) but never allocates — safe on audio thread.
             hist.resize((size_t)M * 2);
@@ -358,19 +379,25 @@ private:
     //
     // Fix: build the IR on the UI thread (AudioProcessor::applySettings), store
     // it in a pre-allocated pending slot, and signal the audio thread via a
-    // single atomic store. The audio thread adopts the IR with a std::move
-    // (O(1)) inside consumePendingSettings() → adoptPendingImpulse(). The
-    // ConvLine::hist buffer is pre-reserved in init() so the resize() inside
-    // setImpulse() never reallocates — making the adoption fully RT-safe.
+    // single atomic store. The audio thread adopts the IR by const-ref copy
+    // into its pre-reserved ConvLine::ir buffer (O(M) element copy, no heap
+    // allocation or deallocation) inside consumePendingSettings() →
+    // adoptPendingImpulse(). Both ConvLine::ir and ConvLine::hist are
+    // pre-reserved in init() so no resize() call ever reallocates — making
+    // the adoption fully RT-safe.
     //
     // SPSC invariant:
     //   • UI thread always writes to pendingSlots_[pendingIrWriteSlot_].
     //   • UI thread advances pendingIrWriteSlot_ only after the atomic store,
-    //     so the written slot is never modified again until the audio thread
-    //     has consumed it and the UI thread wraps around (takes 2+ writes).
-    //   • Audio thread pops via atomic exchange — one read, then -1.
-    //   • A freshly moved-from slot is valid-but-empty (std::move guarantee);
-    //     the UI thread repopulates it on the next write to that slot.
+    //     so the written slot is NOT written again until the audio thread has
+    //     consumed it and the UI thread wraps around (requires 2+ more writes).
+    //   • Audio thread pops via atomic exchange (slot → -1), then reads from
+    //     the slot by const-ref. The slot is not moved-from, so it remains
+    //     valid for the UI thread to reuse on the next round.
+    //   • Race safety: each IR build (buildErImpulse) takes ≥1 ms; wrapping
+    //     back to the same slot requires 2+ builds (≥2 ms). The audio thread's
+    //     const-ref copy (setImpulse) takes ~0.1 ms max. The UI cannot reach
+    //     the same slot while the audio thread is still reading it.
 
     struct PendingIR {
         std::vector<float> l, r;
@@ -415,13 +442,19 @@ public:
     // ── Audio-thread API ──────────────────────────────────────────────────────
     // Call from consumePendingSettings() (audio thread) every 128 samples.
     // O(1) atomic exchange when no IR is pending. When a new IR is available,
-    // swaps it in via std::move (O(1) pointer swap) then zeroes the history
-    // (O(M) fill, ~0.05 ms at 48 kHz — well within a 128-sample window).
+    // copies it into the pre-reserved ConvLine ir buffers (O(M) element copy,
+    // ~0.05 ms at 48 kHz — well within a 128-sample window) then zeroes the
+    // convolution history. No heap allocation or deallocation occurs.
+    //
+    // NOTE: std::move is intentionally NOT used here. setImpulse() now takes
+    // the IR by const-ref and copies element-wise into a pre-reserved buffer,
+    // so the pending slot retains its allocation and the audio thread never
+    // calls free(). The UI thread will repopulate the slot on the next build.
     void adoptPendingImpulse() {
         int slot = pendingIrReady_.exchange(-1, std::memory_order_acquire);
         if (slot < 0) return;
-        erConvL.setImpulse(std::move(pendingSlots_[slot].l));
-        erConvR.setImpulse(std::move(pendingSlots_[slot].r));
+        erConvL.setImpulse(pendingSlots_[slot].l);   // const-ref: no free() on audio thread
+        erConvR.setImpulse(pendingSlots_[slot].r);
     }
 
 private:

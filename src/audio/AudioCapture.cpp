@@ -1,10 +1,7 @@
 #include "AudioCapture.h"
 #include "AudioProcessor.h"
-#include "AudioDiagnostics.h"
 #include <cstring>
-#include <cstdio>   // std::remove
 #include <algorithm>
-#include <QDebug>
 
 #if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
 #include <xmmintrin.h>
@@ -54,11 +51,6 @@ AudioCapture::AudioCapture(AudioProcessor* proc, QObject* parent)
     connect(m_wasapi, &WASAPICapture::errorOccurred,
             this,     &AudioCapture::errorOccurred);
 #endif
-
-    // Flush the diagnostic ring to disk once per second (UI thread).
-    m_diagTimer = new QTimer(this);
-    m_diagTimer->setInterval(1000);
-    connect(m_diagTimer, &QTimer::timeout, this, &AudioCapture::flushDiagnostics);
 }
 
 AudioCapture::~AudioCapture() {
@@ -231,8 +223,6 @@ bool AudioCapture::open(const std::string& inputDeviceId,
 // Close
 // ──────────────────────────────────────────────────────────────────────────────
 void AudioCapture::close() {
-    m_diagTimer->stop();
-
 #ifdef _WIN32
     if (m_wasapi) m_wasapi->close();
     if (m_wasapiMic) m_wasapiMic->close();
@@ -250,28 +240,6 @@ void AudioCapture::close() {
     }
 #endif
     m_open.store(false);
-
-    // Final flush — captures any events that occurred since the last timer tick.
-    flushDiagnostics();
-    qDebug() << "[AudioDiag] Final log written to"
-             << QString::fromStdString(diagLogPath());
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Diagnostics helpers
-// ──────────────────────────────────────────────────────────────────────────────
-std::string AudioCapture::diagLogPath() {
-    const char* tmp = nullptr;
-#ifdef _WIN32
-    tmp = getenv("TEMP");
-    if (!tmp || !*tmp) tmp = getenv("TMP");
-#endif
-    std::string dir = (tmp && *tmp) ? tmp : ".";
-    return dir + "/bassnuker_audio_diag.csv";
-}
-
-void AudioCapture::flushDiagnostics() {
-    AudioDiagnostics::instance().flushToLog(diagLogPath());
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -306,138 +274,61 @@ bool AudioCapture::openOutputOnly(const std::string& outputDeviceId,
         errorOut = QString("PortAudio output: %1").arg(Pa_GetErrorText(err));
         return false;
     }
-
-    // ── Initialise diagnostics before the stream fires its first callback ─────
-    {
-        std::string logPath = diagLogPath();
-        std::remove(logPath.c_str()); // delete stale log from a previous run
-        AudioDiagnostics::instance().reset(sampleRate, bufferSize);
-        qDebug() << "[AudioDiag] Logging to" << QString::fromStdString(logPath)
-                 << "  budget=" << (int)(1e6 * bufferSize / sampleRate) << "us"
-                 << "  sr=" << (int)sampleRate
-                 << "  framesPerCb=" << bufferSize;
-    }
-
     err = Pa_StartStream(m_outStream);
     if (err != paNoError) {
         Pa_CloseStream(m_outStream); m_outStream = nullptr;
         errorOut = QString("Pa_StartStream (out): %1").arg(Pa_GetErrorText(err));
         return false;
     }
-
-    m_diagTimer->start();
     return true;
 }
 
 // ── Windows output callback — runs on the PortAudio real-time audio thread ────
 //
-// INSTRUMENTED: every path that can cause a glitch is measured and logged:
-//   • PortAudio statusFlags  → XRUN (hardware underflow / overflow)
-//   • trimToTargetLatency()  → frames skipped = phase discontinuity = click
-//   • pop() returning false  → ring empty = silence injected = click
-//   • total callback time vs budget → over-budget = next-callback underrun
-//   • sub-time of consumePendingSettings (via thread-local accumulators)
-//
-// All logging is lock-free: atomic increments + memcpy into a pre-allocated
-// ring buffer inside AudioDiagnostics. No malloc, no mutex, no I/O here.
+// In "both" mode the mic ring (m_ring2) frames are scaled by the mic gain
+// BEFORE being summed with the loopback. This ensures the Mic Volume slider
+// scales only the microphone signal:
+//   - Loopback level is unaffected by the mic slider.
+//   - AudioProcessor::processStereo skips the mic gain for "both" mode
+//     (audioSourceBoth flag) so there is no double-application.
 //
 int AudioCapture::outCallback(const void*, void* outputBuffer,
                                unsigned long frameCount,
-                               const PaStreamCallbackTimeInfo* /*timeInfo*/,
-                               PaStreamCallbackFlags statusFlags,
+                               const PaStreamCallbackTimeInfo*,
+                               PaStreamCallbackFlags,
                                void* userData) {
     auto* self = static_cast<AudioCapture*>(userData);
     auto* out  = static_cast<float*>(outputBuffer);
-    auto& diag = AudioDiagnostics::instance();
 
     static thread_local bool denormalGuardEnabled = (enableDenormalFlushToZero(), true);
     (void)denormalGuardEnabled;
 
-    // ── Callback sequence number + thread-local sub-timing reset ─────────────
-    uint32_t seq = diag.callbackCount.fetch_add(1, std::memory_order_relaxed);
-    diag.beginCallback(seq);
-    int64_t cbStart = diag.nowNs();
-
-    // ── 1. PortAudio XRUN detection ───────────────────────────────────────────
-    // Previously this parameter was unnamed and silently discarded.
-    // paOutputUnderflow means the hardware ran out of data (heard as silence/pop).
-    // paInputOverflow   means the capture side overflowed (data lost upstream).
-    if (statusFlags != 0)
-        diag.logXrun(seq, (unsigned int)statusFlags);
-
-    // ── 2. Ring fill snapshot (BEFORE trim) ───────────────────────────────────
-    // Captured here so the log shows exactly how full the ring was when we
-    // decided whether to trim.
-    int fillBefore = self->m_ring.available();
-
-    // ── 3. Gradual latency trim ───────────────────────────────────────────────
-    // trimToTargetLatency() advances the read pointer by up to kTrimStepFrames
-    // (256) when queued fill exceeds kMaxLatencyFrames (9600 = ~200 ms).
-    // The skipped frames are NEVER processed — they create a phase/amplitude
-    // discontinuity = click. Now returns the number of frames actually skipped.
-    int trimmed = self->m_ring.trimToTargetLatency();
-    if (trimmed > 0)
-        diag.logTrim(seq, trimmed, fillBefore);
-
-    // Log push-drops accumulated by the capture thread since the last callback.
-    // push() increments pushDropCount atomically when the ring is full; we
-    // exchange it to 0 here (audio thread) to drain it non-destructively.
-    {
-        uint32_t drops = self->m_ring.pushDropCount.exchange(0, std::memory_order_relaxed);
-        if (drops > 0)
-            diag.logPushDrop((int)drops, fillBefore);
-    }
-
+    self->m_ring.trimToTargetLatency();
     const bool mixMode = self->m_mixMode.load();
-    if (mixMode) {
-        int fill2    = self->m_ring2.available();
-        int trimmed2 = self->m_ring2.trimToTargetLatency();
-        if (trimmed2 > 0)
-            diag.logTrim(seq, trimmed2, fill2);
-        uint32_t drops2 = self->m_ring2.pushDropCount.exchange(0, std::memory_order_relaxed);
-        if (drops2 > 0)
-            diag.logPushDrop((int)drops2, fill2);
-    }
+    if (mixMode) self->m_ring2.trimToTargetLatency();
 
     // Read mic gain once per block (atomic load, cheap).
-    const float micGainVal = mixMode ? self->m_proc->getMicGainAtomic() : 1.f;
-
-    // ── 4. Per-frame DSP loop — timed as a whole ──────────────────────────────
-    // processStereo() calls consumePendingSettings() every 128 samples, which
-    // accumulates its own sub-timings into thread-local vars via diag.accXxx().
-    int underruns = 0;
-    int64_t dspStart = diag.nowNs();
+    // Only used in "both" (mixMode) — in mic-only mode, AudioProcessor handles it.
+    const float micGain = mixMode ? self->m_proc->getMicGainAtomic() : 1.f;
 
     for (unsigned long i = 0; i < frameCount; ++i) {
         float l = 0.f, r = 0.f;
-
-        // pop() returns false (and outputs silence) when the ring is empty.
-        // Silence injection = amplitude step = click.
-        if (!self->m_ring.pop(l, r)) {
-            ++underruns;
-            if (underruns == 1) // log first occurrence; avoid flooding the ring
-                diag.logUnderrun(seq, (int)i, self->m_ring.available());
-        }
+        self->m_ring.pop(l, r);
 
         if (mixMode) {
             // "Both" mode: scale mic frames by mic gain BEFORE summing with
-            // loopback so the Mic Volume slider controls only the mic signal.
+            // loopback. This makes the Mic Volume slider control only the
+            // microphone, not the loopback signal.
             float ml = 0.f, mr = 0.f;
             self->m_ring2.pop(ml, mr);
-            l += ml * micGainVal;
-            r += mr * micGainVal;
+            l += ml * micGain;
+            r += mr * micGain;
         }
 
         self->m_proc->processStereo(l, r);
         out[i*2]   = l;
         out[i*2+1] = r;
     }
-
-    // ── 5. Callback summary ───────────────────────────────────────────────────
-    int totalUs = (int)((diag.nowNs() - cbStart) / 1000);
-    (void)dspStart; // dspUs ≈ totalUs minus the tiny overhead above the loop
-    diag.endCallback(seq, totalUs, fillBefore, underruns);
-
     return paContinue;
 }
 

@@ -1,5 +1,4 @@
 #include "AudioProcessor.h"
-#include "AudioDiagnostics.h"
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -384,45 +383,14 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
 }
 
 void AudioProcessor::consumePendingSettings() {
-    auto& diag = AudioDiagnostics::instance();
-
-    // ── 1. Time adoptPendingImpulse() independently ───────────────────────────
-    // Normally O(1) atomic exchange (no IR pending). When a new IR has been
-    // built by the UI thread, this call performs std::move (O(1)) + std::fill
-    // (O(irLen) — ~0.05 ms at 48 kHz for a 27 000-sample IR). We measure it
-    // so we can verify it stays within the 128-sample budget (~2.67 ms @ 48 kHz)
-    // and is NOT the remaining cause of glitches.
-    int64_t t0 = diag.nowNs();
+    // Adopt any IR pre-built by the UI thread (O(1) atomic load when nothing
+    // is pending; O(M) std::fill on the cycle a new IR arrives — ~0.05 ms,
+    // safely within the 128-sample polling window at 48 kHz).
     reverbEngine.adoptPendingImpulse();
-    int irUs = (int)((diag.nowNs() - t0) / 1000);
-    // Accumulate into the thread-local counter so endCallback() can include it.
-    if (irUs > 0) diag.accIrUs(irUs);
 
-    // ── 2. Check for pending settings ────────────────────────────────────────
     int idx = settingsReadyIndex_.exchange(-1, std::memory_order_acquire);
-    if (idx < 0) {
-        // No pending settings — log IR timing alone if it was nonzero.
-        if (irUs > 0)
-            diag.logSettingsApply(diag.currentSeq(), 0, irUs);
-        return;
-    }
-
-    // ── 3. Time applySettingsInternal() — this is the suspect ────────────────
-    // applySettingsInternal() calls BiquadFilter::setType() (sin/cos/exp) for
-    // every filter in the chain, FDNReverb::setParams() (many cos/exp calls),
-    // EchoEngine::recomputeFilters() (sin/cos/pow for every biquad in the echo
-    // taps), Equalizer::setBands() (up to 10 biquad recalculations), and more.
-    // Total wall time ranges from ~0.3 ms (minimal settings) to >3 ms (full
-    // settings with all modules enabled). At 192 kHz with a 256-frame buffer
-    // the ENTIRE callback budget is 1.3 ms — settings apply alone can exceed it.
-    int64_t t1 = diag.nowNs();
+    if (idx < 0) return;
     applySettingsInternal(settingsBuf_[idx]);
-    int settUs = (int)((diag.nowNs() - t1) / 1000);
-
-    diag.accSettingsUs(settUs);
-    // Log a dedicated event so settings applies are easy to grep in the log
-    // and can be correlated with the glitch timestamps.
-    diag.logSettingsApply(diag.currentSeq(), settUs, irUs);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
