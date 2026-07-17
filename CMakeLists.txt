@@ -208,14 +208,123 @@ if(WIN32)
 endif()
 
 # ── Install / Deploy ─────────────────────────────────────────────────────────
-install(TARGETS BassNuker RUNTIME DESTINATION bin)
+# Install the executable to the root of the install prefix (flat layout).
+# CPack will package whatever ends up under CMAKE_INSTALL_PREFIX, so a flat
+# layout means BassNuker.exe sits directly in the installer's root directory.
+install(TARGETS BassNuker RUNTIME DESTINATION .)
 
-# On Windows, run windeployqt automatically after build (if found)
 if(WIN32)
     find_program(WINDEPLOYQT windeployqt)
+
+    # ── POST_BUILD: pull Qt DLLs next to the .exe for local dev runs ──────────
     if(WINDEPLOYQT)
         add_custom_command(TARGET BassNuker POST_BUILD
-            COMMAND ${WINDEPLOYQT} --no-translations "$<TARGET_FILE:BassNuker>"
-            COMMENT "Running windeployqt...")
+            COMMAND ${WINDEPLOYQT}
+                    --no-translations
+                    --no-opengl-sw
+                    "$<TARGET_FILE:BassNuker>"
+            COMMENT "Running windeployqt (dev build)...")
     endif()
+
+    # ── INSTALL-TIME: pull Qt DLLs into the CPack staging tree ───────────────
+    # We must run windeployqt a second time, targeting the *installed* exe,
+    # because POST_BUILD output lives in the build dir, not the install prefix.
+    if(WINDEPLOYQT)
+        install(CODE "
+            message(STATUS \"windeployqt: staging Qt DLLs for installer…\")
+            execute_process(
+                COMMAND \"${WINDEPLOYQT}\"
+                        --no-translations
+                        --no-opengl-sw
+                        --dir \"\${CMAKE_INSTALL_PREFIX}\"
+                        \"\${CMAKE_INSTALL_PREFIX}/BassNuker.exe\"
+                RESULT_VARIABLE _wdq_result
+            )
+            if(NOT _wdq_result EQUAL 0)
+                message(WARNING \"windeployqt returned \${_wdq_result} — Qt DLLs may be missing from the installer.\")
+            endif()
+        ")
+    endif()
+
+    # ── PortAudio DLL ─────────────────────────────────────────────────────────
+    # When using the vcpkg imported target the DLL lives next to the .lib in
+    # the bin/ sub-directory of the triplet. Try to locate it and stage it.
+    if(TARGET portaudio)
+        get_target_property(_pa_implib portaudio IMPORTED_IMPLIB_RELEASE)
+        if(_pa_implib)
+            get_filename_component(_pa_lib_dir "${_pa_implib}" DIRECTORY)
+            # vcpkg layout: …/lib/portaudio.lib  →  …/bin/portaudio.dll
+            get_filename_component(_pa_root "${_pa_lib_dir}" DIRECTORY)
+            file(GLOB _pa_dll "${_pa_root}/bin/portaudio*.dll")
+        endif()
+    endif()
+    if(NOT _pa_dll)
+        # Fallback: search the standard vcpkg locations
+        file(GLOB _pa_dll
+            "C:/vcpkg/installed/x64-windows/bin/portaudio*.dll"
+            "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin/portaudio*.dll"
+        )
+    endif()
+    if(_pa_dll)
+        install(FILES ${_pa_dll} DESTINATION .)
+    else()
+        message(WARNING
+            "PortAudio DLL not found — the installer will be missing portaudio.dll.\n"
+            "Copy portaudio.dll to the install prefix manually before running CPack.")
+    endif()
+endif()
+
+# ── CPack / NSIS Installer ────────────────────────────────────────────────────
+if(WIN32)
+    set(CPACK_GENERATOR "NSIS")
+
+    # ── Package metadata ──────────────────────────────────────────────────────
+    set(CPACK_PACKAGE_NAME              "BassNuker")
+    set(CPACK_PACKAGE_VENDOR            "Bass Nuker")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+        "Bass Nuker — System Audio Processor (Bass Boost · FDN Reverb · EQ · …)")
+    set(CPACK_PACKAGE_VERSION_MAJOR     ${PROJECT_VERSION_MAJOR})
+    set(CPACK_PACKAGE_VERSION_MINOR     ${PROJECT_VERSION_MINOR})
+    set(CPACK_PACKAGE_VERSION_PATCH     ${PROJECT_VERSION_PATCH})
+    set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "BassNuker")
+
+    # ── Output filename ───────────────────────────────────────────────────────
+    set(CPACK_PACKAGE_FILE_NAME "BassNuker-${PROJECT_VERSION}-win64-setup")
+
+    # ── Icons (MUI2) ──────────────────────────────────────────────────────────
+    set(CPACK_NSIS_MUI_ICON   "${CMAKE_SOURCE_DIR}/resources/icons/icon128.ico")
+    set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/resources/icons/icon128.ico")
+
+    # ── NSIS display strings ──────────────────────────────────────────────────
+    set(CPACK_NSIS_PACKAGE_NAME    "Bass Nuker ${PROJECT_VERSION}")
+    set(CPACK_NSIS_DISPLAY_NAME    "Bass Nuker ${PROJECT_VERSION}")
+    set(CPACK_NSIS_INSTALL_ROOT    "$PROGRAMFILES64")
+
+    # ── Start Menu shortcut ───────────────────────────────────────────────────
+    set(CPACK_PACKAGE_EXECUTABLES  "BassNuker" "Bass Nuker")
+    set(CPACK_NSIS_CREATE_ICONS_EXTRA
+        "CreateShortCut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\Bass Nuker.lnk' \
+'$INSTDIR\\\\BassNuker.exe' '' '$INSTDIR\\\\BassNuker.exe' 0")
+    set(CPACK_NSIS_DELETE_ICONS_EXTRA
+        "Delete '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\Bass Nuker.lnk'")
+
+    # ── Desktop shortcut (opt-in checkbox during install) ────────────────────
+    set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "
+        MessageBox MB_YESNO 'Create a desktop shortcut?' IDNO skip_desktop
+            CreateShortCut '$DESKTOP\\\\Bass Nuker.lnk' '$INSTDIR\\\\BassNuker.exe' \
+'' '$INSTDIR\\\\BassNuker.exe' 0
+        skip_desktop:
+    ")
+    set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
+        "Delete '$DESKTOP\\\\Bass Nuker.lnk'")
+
+    # ── Installer behaviour ───────────────────────────────────────────────────
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_NSIS_MODIFY_PATH OFF)
+
+    # ── License page (optional — comment out if you have no LICENSE.txt) ──────
+    # set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
+
+    include(CPack)
 endif()

@@ -39,17 +39,49 @@ WebView2, CEF, HTML) is used.
 | PortAudio | 19.7+ | On Windows, install via `vcpkg install portaudio:x64-windows` |
 | Compiler | MSVC 2022 / MinGW-w64 | C++17 required |
 
-### Windows (MSVC + vcpkg)
+### Windows — Quick installer build (recommended)
+
+Edit the two paths at the top of **`build-installer.bat`** to match your
+Qt and vcpkg locations, then double-click it (or run from a Developer Command
+Prompt). It will:
+
+1. Configure CMake (Release, x64, MSVC)
+2. Build `BassNuker.exe`
+3. Stage all Qt DLLs via `windeployqt` and the PortAudio DLL
+4. Run CPack/NSIS and produce **`build\BassNuker-6.9.0-win64-setup.exe`**
+
+```
+Prerequisites
+─────────────
+  Qt 6.5+      Qt Online Installer → https://www.qt.io/download
+  vcpkg         git clone https://github.com/microsoft/vcpkg C:\vcpkg
+                C:\vcpkg\bootstrap-vcpkg.bat
+                C:\vcpkg\vcpkg install portaudio:x64-windows
+  CMake 3.20+  https://cmake.org/download/
+  NSIS 3.x     https://nsis.sourceforge.io  (add to PATH)
+  MSVC 2022    Visual Studio 17 2022 with C++ workload
+```
+
+```bat
+:: Edit these two lines in build-installer.bat:
+set QT_DIR=C:\Qt\6.7.0\msvc2019_64
+set VCPKG_ROOT=C:\vcpkg
+
+:: Then run:
+build-installer.bat
+```
+
+---
+
+### Windows — Manual CMake build (without installer)
 
 ```powershell
-# 1. Install vcpkg
+# 1. Install vcpkg + PortAudio
 git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
 C:\vcpkg\bootstrap-vcpkg.bat
-
-# 2. Install PortAudio
 C:\vcpkg\vcpkg install portaudio:x64-windows
 
-# 3. Configure and build
+# 2. Configure and build
 cd bass-nuker-qt
 cmake -B build -G "Visual Studio 17 2022" -A x64 \
       -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
@@ -57,9 +89,19 @@ cmake -B build -G "Visual Studio 17 2022" -A x64 \
 
 cmake --build build --config Release
 
-# 4. Deploy Qt DLLs (run from the build/Release directory)
+# 3. Deploy Qt DLLs (run from the build/Release directory)
 cd build\Release
 windeployqt --release BassNuker.exe
+```
+
+---
+
+### Manual installer (CPack only — if you already built)
+
+```powershell
+cd build
+cpack -G NSIS -C Release
+# → BassNuker-6.9.0-win64-setup.exe
 ```
 
 ### macOS (Homebrew — for development/testing; loopback requires BlackHole or Loopback app)

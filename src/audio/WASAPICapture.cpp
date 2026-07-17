@@ -244,6 +244,28 @@ private:
         }
         *pActualRate = (double)mixFmt->nSamplesPerSec;
 
+        // ── "Both" mode clock-matching ──────────────────────────────────────
+        // The mic and loopback devices are two independently-clocked WASAPI
+        // endpoints; each negotiates its OWN native mix rate above (e.g.
+        // speakers at 48000 Hz, a USB/headset mic at 44100 or 16000 Hz).
+        // AudioCapture::outCallback pops one frame from each ring per output
+        // sample in lockstep — if the two producer rates don't match, one
+        // ring silently drains faster than the other and the mismatch
+        // accumulates, causing intermittent, seemingly-random dropouts/
+        // freezes (heard only in "Both" mode, not with a single source).
+        //
+        // Fix: when the caller requested a specific rate (AudioCapture passes
+        // the loopback's already-negotiated rate when opening the mic), force
+        // this endpoint to that rate and let AUTOCONVERTPCM have the WASAPI
+        // engine resample internally, so both rings are always fed at the
+        // exact same rate the output callback consumes them at.
+        if (deviceType != AudioDeviceType::Loopback && requestedRate > 0.0 &&
+            (UINT32)requestedRate != mixFmt->nSamplesPerSec) {
+            mixFmt->nSamplesPerSec  = (DWORD)requestedRate;
+            mixFmt->nAvgBytesPerSec = mixFmt->nSamplesPerSec * mixFmt->nBlockAlign;
+            *pActualRate = requestedRate;
+        }
+
         REFERENCE_TIME defaultPeriod = 0, minPeriod = 0;
         audioClient->GetDevicePeriod(&defaultPeriod, &minPeriod);
 
@@ -252,6 +274,11 @@ private:
         DWORD streamFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
         if (deviceType == AudioDeviceType::Loopback)
             streamFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
+        else if (requestedRate > 0.0)
+            // Let the WASAPI shared-mode engine resample the mic stream to
+            // the forced rate above instead of rejecting the format.
+            streamFlags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                            AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
 
         REFERENCE_TIME bufDuration = (deviceType == AudioDeviceType::Loopback)
                                          ? defaultPeriod : (minPeriod > 0 ? minPeriod : defaultPeriod);
