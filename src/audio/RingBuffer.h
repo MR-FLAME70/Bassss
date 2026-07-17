@@ -54,6 +54,23 @@ public:
         readIdx .store(0, std::memory_order_relaxed);
     }
 
+    // Called once from the main thread, right after the startup pre-fill
+    // wait and before Pa_StartStream(). While that wait loop polls
+    // available(), the WASAPI capture thread keeps pushing frames — so by
+    // the time the wait condition is satisfied, the ring can already hold
+    // well more than kTargetLatencyFrames. Without this, the very first
+    // output callback finds queued > kMaxLatencyFrames and performs its
+    // (rare, deliberate) big one-shot skip immediately — heard as an
+    // audible cut right at startup. Snapping down to the target here, once,
+    // before playback even begins, means that skip never has to fire live.
+    void resetToTargetLatency() {
+        int w = writeIdx.load(std::memory_order_acquire);
+        int rd = readIdx.load(std::memory_order_relaxed);
+        if ((w - rd) > kTargetLatencyFrames) {
+            readIdx.store(w - kTargetLatencyFrames, std::memory_order_release);
+        }
+    }
+
     // Called from the producer thread.
     // Drops the frame silently if the buffer is full (consumer is stalling).
     void push(float l, float r) {

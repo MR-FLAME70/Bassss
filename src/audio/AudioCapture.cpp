@@ -181,6 +181,15 @@ bool AudioCapture::open(const std::string& inputDeviceId,
                 waited += kStepMs;
             }
         }
+
+        // The wait loop(s) above only check for "at least" the target — the
+        // capture thread keeps pushing the whole time, so by now the ring(s)
+        // can hold noticeably more than kTargetLatencyFrames. Snap back down
+        // to the target here, once, before Pa_StartStream() runs, so the
+        // first output callback doesn't have to perform its big one-shot
+        // trim live (which was audible as a cut right at startup).
+        m_ring.resetToTargetLatency();
+        if (m_mixMode.load()) m_ring2.resetToTargetLatency();
     }
 
     if (!openOutputOnly(outputDeviceId, m_sampleRate, bufferSize, errorOut)) {

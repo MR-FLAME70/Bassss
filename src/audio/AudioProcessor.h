@@ -107,6 +107,12 @@ private:
     std::atomic<float> volumeGain{1.f};
     std::atomic<float> micGain{1.f};
 
+    // True only when the current input actually includes a microphone
+    // signal (audioSourceMode == "microphone" or "both"). See
+    // processStereo(): the mic-gain slider must never attenuate the
+    // loopback/reverb path when no mic is in the mix (see bug notes there).
+    std::atomic<bool> micInMix{false};
+
     // Reverb
     ReverbEngine reverbEngine;
     BiquadFilter resonanceFilter; // narrow peaking on wet path

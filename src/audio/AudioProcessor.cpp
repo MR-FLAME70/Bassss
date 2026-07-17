@@ -93,6 +93,7 @@ void AudioProcessor::applySettingsInternal(const AppSettings& s) {
 
     volumeGain.store(s.volume / 100.f);
     micGain.store(s.micVolume / 100.f);
+    micInMix.store(s.audioSourceMode == "microphone" || s.audioSourceMode == "both");
 
     // ── Reverb Engine ─────────────────────────────────────────────────────────
     // Matches offscreen.js exactly: there is a single hybrid reverb engine,
@@ -487,9 +488,21 @@ void AudioProcessor::processStereo(float& l, float& r) {
     micGainSm_.setTarget(micGain.load());
 
     // ── Mic / input gain ─────────────────────────────────────────────────────
-    {
+    // Only apply the mic-gain slider when a microphone is actually part of
+    // the current input mix ("microphone" or "both" source mode). In
+    // loopback-only ("playback") mode there is no mic signal in l/r at all —
+    // applying this gain there was scaling the ENTIRE signal (including what
+    // feeds the reverb wet path below), so dragging the mic slider to 0
+    // silenced playback and reverb along with it, even though no mic was
+    // ever in the mix. Note: in "both" mode this still scales the already-
+    // summed loopback+mic signal together (mic and loopback can no longer be
+    // separated once mixed in AudioCapture::outCallback) — a separate,
+    // smaller issue than the one this fixes.
+    if (micInMix.load()) {
         float mg = micGainSm_.next();
         l *= mg; r *= mg;
+    } else {
+        micGainSm_.next(); // keep the smoother caught up so no jump on mode switch
     }
 
     // ── Bass low-shelf + volume ───────────────────────────────────────────────

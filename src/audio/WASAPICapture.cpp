@@ -15,6 +15,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <avrt.h>
 #include <combaseapi.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
@@ -135,18 +136,37 @@ public:
 
 public slots:
     void run() {
-        // Raise the capture thread to time-critical priority so Windows
-        // schedules it promptly even under system load. Without this,
-        // the OS can delay the capture thread by 15-100 ms, draining the
-        // ring buffer and causing audible freeze/dropout in the output.
-        // SetThreadPriority on the current Win32 thread is instant and
-        // safe to call from any thread context.
+        // ── Real-time scheduling via MMCSS (NOT raw TIME_CRITICAL) ────────────
+        // Windows' Multimedia Class Scheduler Service is the OS-sanctioned way
+        // to get an audio thread scheduled promptly. It grants short, bounded
+        // priority boosts specifically tuned for the "Pro Audio" workload
+        // class, coordinated with the rest of the system.
+        //
+        // A raw SetThreadPriority(TIME_CRITICAL) — the previous approach here
+        // — sits above almost everything else in the system (including the
+        // desktop compositor and input handling) with no such coordination.
+        // Under sustained or bursty load (e.g. louder signal driving a few
+        // extra fractions of a millisecond through the DSP chain per block)
+        // that can starve other threads system-wide, which is felt by the
+        // user as the whole PC "hanging" momentarily — while Task Manager's
+        // 1-second sampling shows nothing unusual, because the process's own
+        // CPU *time* barely changed; what changed is who else got starved
+        // while this thread held the core.
 #ifdef _WIN32
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+        DWORD mmcssTaskIndex = 0;
+        HANDLE mmcssHandle = AvSetMmThreadCharacteristicsW(L"Pro Audio", &mmcssTaskIndex);
+        if (!mmcssHandle) {
+            // MMCSS unavailable/failed — fall back to the old behavior rather
+            // than running at normal priority and risking underruns.
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+        }
 #endif
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         if (!doCapture()) pRunning->store(false);
         CoUninitialize();
+#ifdef _WIN32
+        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
+#endif
     }
 
 signals:

@@ -198,9 +198,11 @@ endif()
 # uuid       — GUID definitions (__uuidof)
 # propsys    — IPropertyStore / PKEY_Device_FriendlyName
 # ksuser     — Required by PortAudio WASAPI host (KS streaming)
+# avrt       — AvSetMmThreadCharacteristics / AvRevertMmThreadCharacteristics
+#              (MMCSS real-time scheduling for the WASAPI capture thread)
 if(WIN32)
     target_link_libraries(BassNuker PRIVATE
-        ole32 uuid propsys ksuser)
+        ole32 uuid propsys ksuser avrt)
 
     # Suppress the console window in Release builds
     set_target_properties(BassNuker PROPERTIES
